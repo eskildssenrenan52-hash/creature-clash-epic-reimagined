@@ -38,6 +38,7 @@ export function CinemaStage({ scene, line, beat, look }: { scene: EpicScene; lin
     c.imageSmoothingEnabled = false;
     const script = directScene(beat ?? { id: scene.id, title: scene.title, lines: scene.lines }, look);
     const actors = scene.actors.length ? scene.actors : [HERO];
+    console.log("CINE", script.id, script.mood, script.setting, script.shots.map((x) => x.kind).join(","));
     const pal = PALS[script.setting];
     const rr = rngOf(script.seed ^ 0x9e37);
     const parts = Array.from({ length: 90 }, (_, i) => ({ x: rr() * W, y: rr() * H, v: 8 + rr() * 30, s: rr(), i }));
