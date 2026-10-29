@@ -54,7 +54,7 @@ export function CinemaStage({ scene, line, beat, look }: { scene: EpicScene; lin
       c.filter = `hue-rotate(${script.hue}deg)${shot.kind === "flashback" ? " sepia(0.85) contrast(1.1)" : ""}`;
       // céu
       const g = c.createLinearGradient(0, 0, 0, HORIZON);
-      g.addColorStop(0, pal.sky[0]); g.addColorStop(1, shade(pal.sky[1], -script.night * 0.6)); c.fillStyle = g; c.fillRect(0, 0, W, H);
+      g.addColorStop(0, pal.sky[0]); g.addColorStop(1, shade(pal.sky[1], -script.night * 0.35)); c.fillStyle = g; c.fillRect(0, 0, W, H);
       const tiltY = shot.kind === "skyTilt" ? (1 - ease) * 60 : 0;
       c.translate(W / 2 + shake, H / 2 + tiltY); c.rotate(shot.tilt * Math.sin(local * 0.5)); c.scale(zoom, zoom); c.translate(-W / 2 - pan * 0.2, -H / 2);
       // astro
@@ -77,7 +77,7 @@ export function CinemaStage({ scene, line, beat, look }: { scene: EpicScene; lin
       c.setTransform(1, 0, 0, 1, 0, 0); c.filter = "none";
       weather(c, script, parts, T);
       // luz e grade de cor
-      const v = c.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, 210); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, `rgba(0,0,0,${0.55 + script.night * 0.25})`); c.fillStyle = v; c.fillRect(0, 0, W, H);
+      const v = c.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, 210); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, `rgba(0,0,0,${0.35 + script.night * 0.2})`); c.fillStyle = v; c.fillRect(0, 0, W, H);
       if (shot.kind === "flashback") { c.fillStyle = "rgba(0,0,0,.15)"; for (let y = 0; y < H; y += 2) c.fillRect(0, y, W, 1); }
       // transições: abre/fecha em preto, ou flash branco no estilhaço
       const fadeIn = Math.max(0, 1 - local / 0.5), fadeOut = Math.max(0, 1 - (shot.dur - local) / 0.5);
@@ -90,7 +90,8 @@ export function CinemaStage({ scene, line, beat, look }: { scene: EpicScene; lin
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [scene, beat, look]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene.id]);
   return <canvas ref={ref} width={W} height={H} className="cinema-stage" aria-hidden />;
 }
 

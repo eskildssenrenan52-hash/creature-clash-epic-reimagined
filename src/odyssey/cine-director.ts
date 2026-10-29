@@ -25,13 +25,13 @@ export function rngOf(seed: number) { let s = seed >>> 0 || 1; return () => { s 
 const has = (t: string, ...w: string[]) => w.some((x) => t.includes(x));
 
 export function detectSetting(t: string): Setting {
-  if (has(t, "abismo", "silêncio", "sombra", "vael", "cinza", "vazio", "ømnia")) return "abyss";
   if (has(t, "fogo", "chama", "vulc", "brasa", "forja", "lava", "fornalha")) return "fire";
   if (has(t, "gelo", "neve", "glacial", "geada", "pico", "fenrir", "inverno")) return "ice";
   if (has(t, "mar", "maré", "coral", "porto", "onda", "leviat", "naufr", "ilha")) return "sea";
   if (has(t, "areia", "desert", "escorpi", "oásis", "duna", "sahr")) return "desert";
   if (has(t, "cristal", "colosso", "gema", "caverna", "mina")) return "crystal";
-  if (has(t, "floresta", "raiz", "raízes", "árvore", "ent ", "cerejeira", "esporo", "cogumelo", "bosque")) return "forest";
+  if (has(t, "floresta", "raiz", "raízes", "árvore", "ent ", "cerejeira", "pétala", "flor", "esporo", "cogumelo", "bosque")) return "forest";
+  if (has(t, "abismo", "vazio", "ømnia", "sem-eco", "manto cinza")) return "abyss";
   if (has(t, "céu", "estrela", "nuvem", "vento", "aurora")) return "sky";
   if (has(t, "ruína", "templo", "santuário", "antig")) return "ruins";
   return "village";
