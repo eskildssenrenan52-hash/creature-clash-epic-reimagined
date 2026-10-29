@@ -99,3 +99,7 @@
 - [x] Empacotar o jogo publicado em um APK assinado para instalação direta.
 - [x] Verificar assinatura, integridade e abertura do jogo publicado em navegador mobile, com continuação após recarregar; entregar o APK online.
 - [ ] Validar instalação e execução em Android real (depende de um aparelho; não há dispositivo Android ou emulador disponível neste ambiente).
+# Cutscenes e chefes (29/out/2026)
+- [x] Trazer o repositório inteiro e recriar contas no Lovable Cloud.
+- [x] Cada cena com roteiro próprio (6+ planos, ≥22 s), coerente com o que acontece.
+- [x] Chefes mais fortes (+60% de dano) com 10 ataques e sequência única por chefe.

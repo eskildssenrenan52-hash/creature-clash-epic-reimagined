@@ -40,3 +40,5 @@
 - New world creatures live in src/odyssey/foes.ts (pure data, no value imports, merged into ENEMIES/BIOME_ENEMIES/MONSTER_LEVEL), drawn by foe-art.ts via drawEnemy's default branch and driven by traits in foe-play.ts; original enemy pools stay untouched.
 - Android bundles the browser-only Odyssey screen and assets at an intercepted HTTPS local origin using platform Activity/WebView; guest saves stay in app storage, accounts are excluded, and prototype signing is not Play Store signing.
 - PetsPanel uses pets.ts rules and pet-play.ts state, committing through existing saves to preserve legacy world progress.
+- Cutscenes are directed by `src/odyssey/cine-director.ts` (text → setting/mood → shot list, seeded by beat id) and drawn by `CinemaStage`; keep scripts deterministic so tests can assert uniqueness and minimum length.
+- Boss attacks live in `src/odyssey/boss-moves.ts`; each boss id maps to a unique 10-move sequence, so add new moves there instead of inside `engine.updateBoss`.
