@@ -1,4 +1,5 @@
 import { epicOnKill, epicOnBiome, epicSave, epicLoad, shopPriceMult } from "./epic-play";
+import { BOSS_MOVES, BOSS_DAMAGE_MULT, bossSequence, type BossCtx } from "./boss-moves";
 import { castSkill, skillTick, freshBuffs, knows, damageTakenMult, damageDealtMult, speedMult, luckMult, type Buffs } from "./skill-play";
 import { SKILL_BY_ID, SPIRIT_IDS } from "./skills";
 import { cloudShadows, filmGrain, lensGlow, lightMotes, softBloom, splitTone } from "./cinema-fx";
@@ -69,7 +70,7 @@ const AMBIENT: Partial<Record<Biome, { mode: "fall" | "rise" | "drift"; color: s
   amber: { mode: "drift", color: "#ffd080", n: 36 }, oasis: { mode: "drift", color: "#fff0b0", n: 32, glow: true }, ruins: { mode: "drift", color: "#e8d8b0", n: 24 },
 };
 
-interface BossState { def: BossDef; active: boolean; phase: 1 | 2; patT: number; charge: number; cvx: number; cvy: number }
+interface BossState { def: BossDef; active: boolean; phase: 1 | 2; patT: number; charge: number; cvx: number; cvy: number; step?: number; pend?: { t: number; fn: () => void }[] }
 export interface Enemy {
   id: number; kind: EnemyKind; x: number; y: number; hx: number; hy: number; hp: number; maxhp: number; atk: number; def: number;
   speed: number; xp: number; gold: number; level: number; cd: number; hurt: number; dir: number; alive: boolean; respawn: number;
@@ -1102,49 +1103,52 @@ export class Game {
       this.burst(e.x, e.y - 20, "#ff4040", 40, 120, 3);
     }
     const ph2 = bs.phase === 2;
+    const atk = e.atk * BOSS_DAMAGE_MULT;
+    // ataques com atraso (ondas, sequências)
+    if (bs.pend?.length) {
+      for (const q of bs.pend) q.t -= dt;
+      const due = bs.pend.filter((q) => q.t <= 0); bs.pend = bs.pend.filter((q) => q.t > 0);
+      for (const q of due) q.fn();
+    }
     if (bs.charge > 0) {
       bs.charge -= dt;
       this.moveBody(e, bs.cvx * dt, bs.cvy * dt, 10, 6);
       if (Math.random() < 0.5) this.parts.push({ x: e.x, y: e.y, vx: 0, vy: -10, life: 0.4, max: 0.4, color: bs.def.color, size: 3, grav: 0 });
-      if (d < 26) this.hurtPlayer(e.atk * 1.3, e.x, e.y);
+      if (d < 26) this.hurtPlayer(atk * 1.3, e.x, e.y);
       return;
     }
     // chase
     if (d > 24) this.moveBody(e, (dx / d) * e.speed * (ph2 ? 1.4 : 1) * dt, (dy / d) * e.speed * (ph2 ? 1.4 : 1) * dt, 10, 6);
     if (Math.abs(dx) > 4) e.dir = dx < 0 ? 1 : 2;
-    if (d < 28 && e.cd <= 0) { e.cd = 1; this.hurtPlayer(e.atk, e.x, e.y); }
+    if (d < 28 && e.cd <= 0) { e.cd = 1; this.hurtPlayer(atk, e.x, e.y); }
     bs.patT -= dt;
     if (bs.patT > 0) return;
-    bs.patT = ph2 ? 1.6 : 2.6;
-    const pats = ph2 ? ["ring", "tele", "summon", "charge", "volley", "tele"] : ["ring", "tele", "volley", "charge"];
-    const pat = pats[Math.floor(Math.random() * pats.length)];
+    bs.patT = ph2 ? 1.5 : 2.4;
+    const seq = bossSequence(bs.def.id);
+    const step = bs.step ?? 0; bs.step = step + 1;
+    // fase 1 usa os 6 primeiros golpes; na fúria, todos os 10, na ordem própria do chefe.
+    const moveId = ph2 ? seq[step % seq.length]! : seq[step % 6]!;
     const c = bs.def.color;
-    if (pat === "ring") {
-      const n = ph2 ? 18 : 12, off = Math.random();
-      for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + off; this.projs.push({ x: e.x, y: e.y - 14, vx: Math.cos(a) * 95, vy: Math.sin(a) * 95, life: 2.5, dmg: e.atk * 0.8, from: "e", kind: "boss", r: 4, color: c }); }
-      this.audio.sfx("fire");
-    } else if (pat === "volley") {
-      const base = Math.atan2(dy, dx);
-      for (let i = -2; i <= 2; i++) { const a = base + i * 0.18; this.projs.push({ x: e.x, y: e.y - 14, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150, life: 2, dmg: e.atk * 0.8, from: "e", kind: "boss", r: 4, color: c }); }
-      this.audio.sfx("bow");
-    } else if (pat === "tele") {
-      const n = ph2 ? 5 : 3;
-      for (let i = 0; i < n; i++) {
-        const ox = i === 0 ? 0 : (Math.random() - 0.5) * 90, oy = i === 0 ? 0 : (Math.random() - 0.5) * 90;
-        this.teles.push({ x: p.x + ox, y: p.y + oy, r: 22, t: 1.1, max: 1.1, dmg: e.atk * 1.4 });
-      }
-    } else if (pat === "summon") {
-      for (let i = 0; i < 3; i++) {
-        const m = this.makeEnemy(bs.def.minion, e.x + (Math.random() - 0.5) * 60, e.y + (Math.random() - 0.5) * 60, enemyLevel(bs.def.biome, bs.def.minion) + cycleBonus(this.cycle));
-        m.summoned = true; m.hx = e.hx; m.hy = e.hy;
-        if (!solidAt(this.world, m.x, m.y)) { this.enemies.push(m); this.burst(m.x, m.y - 6, c, 12, 60); }
-      }
-      this.toast(`${bs.def.name} invoca reforços!`, "#ffa060");
-    } else if (pat === "charge") {
-      this.teles.push({ x: p.x, y: p.y, r: 14, t: 0.6, max: 0.6, dmg: 0 });
-      bs.charge = 0.7; bs.cvx = (dx / d) * 230; bs.cvy = (dy / d) * 230;
-      this.audio.sfx("wind");
-    }
+    const ctx: BossCtx = {
+      ex: e.x, ey: e.y, px: p.x, py: p.y, atk, color: c, ph2,
+      shot: (x, y, vx, vy, dmg, r = 4, life = 2.5) => this.projs.push({ x, y, vx, vy, life, dmg, from: "e", kind: "boss", r, color: c }),
+      tele: (x, y, r, delay, dmg) => this.teles.push({ x, y, r, t: delay, max: delay, dmg }),
+      later: (delay, fn) => (bs.pend ??= []).push({ t: delay, fn: () => { if (!e.alive || !bs.active) return; ctx.ex = e.x; ctx.ey = e.y; ctx.px = p.x; ctx.py = p.y; fn(); } }),
+      charge: (vx, vy, time) => { bs.charge = time; bs.cvx = vx; bs.cvy = vy; },
+      blink: (x, y) => { if (!solidAt(this.world, x, y)) { this.burst(e.x, e.y - 10, c, 20, 80); e.x = x; e.y = y; this.burst(x, y - 10, c, 30, 120); } },
+      summon: (n) => {
+        for (let i = 0; i < n; i++) {
+          const m = this.makeEnemy(bs.def.minion, e.x + (Math.random() - 0.5) * 60, e.y + (Math.random() - 0.5) * 60, enemyLevel(bs.def.biome, bs.def.minion) + cycleBonus(this.cycle));
+          m.summoned = true; m.hx = e.hx; m.hy = e.hy;
+          if (!solidAt(this.world, m.x, m.y)) { this.enemies.push(m); this.burst(m.x, m.y - 6, c, 12, 60); }
+        }
+        this.toast(`${bs.def.name} invoca reforços!`, "#ffa060");
+      },
+      shake: (n) => { this.shake = Math.max(this.shake, n); },
+      sfx: (n) => this.audio.sfx(n as never),
+    };
+    BOSS_MOVES[moveId]!.run(ctx);
+    this.texts.push({ x: e.x, y: e.y - 44, text: BOSS_MOVES[moveId]!.name, color: c, life: 1.2 });
     this.enemies = this.enemies.filter((x) => !(x.summoned && !x.alive));
   }
 
