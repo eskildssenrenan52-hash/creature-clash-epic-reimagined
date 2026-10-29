@@ -49,7 +49,7 @@ const LEGACY_BOSS_LOOK: Record<string, { kind: EnemyKind; tint: string; scale: n
   fenrir: { kind: "wolf", tint: "#b8e4ff", scale: 2.6 },
   crystal_golem: { kind: "golem", tint: "#b080ff", scale: 2.5 },
 };
-const BOSS_LOOK: Record<string, { kind: EnemyKind; tint: string; scale: number }> = { ...LEGACY_BOSS_LOOK, ...STORY_BOSS_LOOK, ...ABYSS_BOSS_LOOK, ...SAGA_BOSS_LOOK };
+export const BOSS_LOOK: Record<string, { kind: EnemyKind; tint: string; scale: number }> = { ...LEGACY_BOSS_LOOK, ...STORY_BOSS_LOOK, ...ABYSS_BOSS_LOOK, ...SAGA_BOSS_LOOK };
 
 /** Cor de grading por bioma legado (os biomas de fronteira usam a própria cor-base). [r, g, b, alpha] */
 const GRADES: Partial<Record<Biome, [number, number, number, number]>> = {

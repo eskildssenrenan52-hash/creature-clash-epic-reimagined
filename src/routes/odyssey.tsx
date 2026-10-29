@@ -15,7 +15,20 @@ import { Modal, Section, Meter } from "@/components/GameModal";
 import { Button } from "@/components/ui/button";
 import { BUILDINGS, TREASURES } from "@/odyssey/exploration";
 import { W, H } from "@/odyssey/world";
-import { Game, VW, VH } from "@/odyssey/engine";
+import { Game, VW, VH, BOSS_LOOK } from "@/odyssey/engine";
+import { directScene } from "@/odyssey/cine-director";
+
+/** Avança as falas no ritmo da cena (mínimo de 22 s por cena); tocar ainda adianta. */
+function CutsceneClock({ g }: { g: Game }) {
+  const cs = g.cutscene; const id = cs?.beat.id, i = cs?.i ?? 0;
+  useEffect(() => {
+    const c = g.cutscene; if (!c || c.i >= c.beat.lines.length - 1) return;
+    const per = (directScene(c.beat).total / c.beat.lines.length) * 1000;
+    const t = setTimeout(() => { if (g.cutscene?.beat.id === id && g.cutscene.i === i) g.advanceCutscene(); }, per);
+    return () => clearTimeout(t);
+  }, [g, id, i]);
+  return null;
+}
 import { ITEMS, NPCS, QUESTS, SPIRITS, STATUES, SHOP, type Slot, type Stats } from "@/odyssey/data";
 import { drawChar, drawItemIcon } from "@/odyssey/gfx";
 import { loadout, knows } from "@/odyssey/skill-play";
@@ -363,7 +376,8 @@ export function OdysseyScreen() {
         {g && !title && g.cutscene && (
           <div className="cutscene absolute inset-0" onClick={() => g.advanceCutscene()} role="dialog" aria-label={g.cutscene.beat.title}>
             <div className="cutscene-bar cutscene-top"><span>{g.cutscene.beat.title}</span></div>
-            <CinemaStage key={g.cutscene.beat.id} scene={stageFor(g.cutscene.beat.id, g.cutscene.beat.stage)} line={g.cutscene.i} />
+            <CinemaStage key={g.cutscene.beat.id} scene={stageFor(g.cutscene.beat.id, g.cutscene.beat.stage)} line={g.cutscene.i} beat={g.cutscene.beat} look={g.cutscene.beat.trigger.startsWith("boss:") ? BOSS_LOOK[g.cutscene.beat.trigger.slice(5)] ?? null : null} />
+            <CutsceneClock g={g} />
             <div className="tap-to-continue" aria-hidden>Toque para continuar</div>
             <div className="cutscene-body"><p key={`${g.cutscene.beat.id}-${g.cutscene.i}`} className="cutscene-line">{g.cutscene.beat.lines[g.cutscene.i]}</p></div>
             <div className="cutscene-bar cutscene-bottom"><span className="opacity-70">{g.cutscene.i + 1}/{g.cutscene.beat.lines.length}</span>
