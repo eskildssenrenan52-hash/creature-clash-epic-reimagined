@@ -188,7 +188,7 @@ function shotContent(c: CanvasRenderingContext2D, s: Script, kind: string, local
       break;
     }
     case "heroClose": {
-      const a = actors[speaker] ?? hero; actor(c, a.pal, 160, gy + 60, 7, 0, 0);
+      const a = actors[speaker] ?? hero; actor(c, a.pal, 160, gy + 44, 6, 0, 0);
       c.fillStyle = "rgba(255,230,140,.95)"; c.font = "8px monospace"; c.textAlign = "center"; c.fillText(a.name, 160, 24);
       break;
     }

@@ -22,7 +22,9 @@ export const MIN_SCENE_SECONDS = 22;
 export function hashId(s: string) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0; return h >>> 0 || 1; }
 export function rngOf(seed: number) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
 
-const has = (t: string, ...w: string[]) => w.some((x) => t.includes(x));
+const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Procura palavras pelo começo (evita "mar" dentro de "lembrar"). */
+const has = (t: string, ...w: string[]) => w.some((x) => new RegExp(`(^|[^a-zà-ÿ])${esc(x.trim())}`, "i").test(t));
 
 export function detectSetting(t: string): Setting {
   if (has(t, "fogo", "chama", "vulc", "brasa", "forja", "lava", "fornalha")) return "fire";
@@ -42,6 +44,7 @@ export function detectMood(id: string, trigger: string, t: string): Mood {
   if (id === "epilogue" || id.startsWith("saga_epi") || has(t, "epílogo", "renasc")) return "finale";
   if (id.startsWith("diario")) return "journal";
   if (id.startsWith("rumor")) return "rumor";
+  if (trigger.startsWith("boss:") || id.startsWith("saga_win") || id.startsWith("eco_")) return "defeat";
   if (id.startsWith("memoria") || has(t, "memória", "lembra", "éramos", "cem anos")) return "memory";
   if (id.startsWith("chegada") || trigger.startsWith("quest:") && has(t, "observa", "chegou", "chega")) return "arrival";
   if (has(t, "confiss", "irmão", "covardia", "eu fui")) return "confession";
