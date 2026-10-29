@@ -24,7 +24,7 @@ function CutsceneClock({ g }: { g: Game }) {
   useEffect(() => {
     const c = g.cutscene; if (!c || c.i >= c.beat.lines.length - 1) return;
     const per = (directScene(c.beat).total / c.beat.lines.length) * 1000;
-    const t = setTimeout(() => { if (g.cutscene?.beat.id === id && g.cutscene.i === i) g.advanceCutscene(); }, per);
+    const t = setTimeout(() => { const n = g.cutscene; if (n && n.beat.id === id && n.i === i) g.advanceCutscene(); }, per);
     return () => clearTimeout(t);
   }, [g, id, i]);
   return null;
