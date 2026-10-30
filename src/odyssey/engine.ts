@@ -1,3 +1,4 @@
+import { liveTick, liveDrawWorld, liveDrawScreen, type LiveScene, type BossCard } from "./live-scenes";
 import { epicOnKill, epicOnBiome, epicSave, epicLoad, shopPriceMult } from "./epic-play";
 import { castSkill, skillTick, freshBuffs, knows, damageTakenMult, damageDealtMult, speedMult, luckMult, type Buffs } from "./skill-play";
 import { SKILL_BY_ID, SPIRIT_IDS } from "./skills";
@@ -166,6 +167,8 @@ export class Game {
   activeBoss: Enemy | null = null;
   biome: Biome = "plains";
   biomeBanner = { name: "", t: 0 };
+  live: LiveScene | null = null;
+  bossCard: BossCard | null = null;
   raining = false;
   /** Qualidade adaptativa: espaça efeitos pesados em aparelhos fracos sem removê-los. */
   quality = new Quality();
@@ -950,6 +953,7 @@ export class Game {
   }
 
   update(dt: number) {
+    if (this.started && !this.paused && liveTick(this, dt)) { this.updateFx(dt); return; }
     if (!this.started || this.paused || this.dialog || this.openStation || this.cutscene) { this.updateFx(dt * 0.0); return; }
     this.lastDelta = dt;
     this.actionCooldown = Math.max(0,this.actionCooldown-dt);
@@ -1434,8 +1438,10 @@ export class Game {
       c.fillStyle = t.color; c.fillText(t.text, t.x, t.y);
     }
     c.globalAlpha = 1;
+    liveDrawWorld(this, c);
     c.setTransform(1, 0, 0, 1, 0, 0);
     if (!this.interior && !this.depth && !this.island) { this.renderWaypoint(c); this.renderMinimap(); }
+    liveDrawScreen(this, c);
     this.renderInteractionPrompt(c);
     if(this.transition>0){c.fillStyle=`rgba(13,24,25,${Math.min(1,this.transition*1.5)})`;c.fillRect(0,0,this.viewWidth,this.viewHeight);}
     if (p.dead > 0) { c.fillStyle = `rgba(0,0,0,${Math.min(0.8, (2.5 - p.dead))})`; c.fillRect(0, 0, this.viewWidth, this.viewHeight); }
