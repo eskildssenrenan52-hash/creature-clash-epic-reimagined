@@ -5,6 +5,7 @@ import type { BossDef, EnemyKind, ItemDef, NpcDef, Palette, QuestDef, Recipe } f
 import { FRONTIER, FRONTIER_GATES, type FrontierBiome } from './frontier';
 import { BIOME_LEVEL } from './levels';
 import { CHRONICLE_BEATS } from './chronicle';
+import type { EpicScene, StageFx } from './epic';
 
 /* ───────────────────────────── Atos ───────────────────────────── */
 export interface Act { id: number; name: string; subtitle: string; biomes: FrontierBiome[] }
@@ -264,7 +265,12 @@ export function endgameDrop(level: number): string | null {
 
 /* ───────────────────────────── Cenas (cutscenes) ───────────────────────────── */
 export interface Beat { id: string; trigger: string; title: string; lines: string[]; stage?: import('./epic').EpicScene }
-const ecoBeats: Beat[] = ECOS.map(e => ({ id: `eco_${e.biome}`, trigger: `boss:${e.biome}_boss`, title: e.eco, lines: e.victory }));
+const ECO_FX: import('./epic').StageFx[] = ['embers', 'petals', 'waves', 'spiral', 'blessing', 'stars', 'void', 'rain', 'shards', 'duel', 'quake', 'flash', 'void', 'waves', 'blessing', 'stars', 'void'];
+const ecoStage = (e: EcoDef, i: number): import('./epic').EpicScene => ({ id: `eco_${e.biome}`, title: e.eco, actors: [
+  { name: 'Você', pal: PALS[(i + 2) % PALS.length]! }, { name: e.vigia.name, pal: PALS[i % PALS.length]! },
+  { name: e.boss.name, pal: { skin: '#b8a090', hair: e.boss.tint, body: e.boss.tint, legs: '#202030' } },
+], fx: ECO_FX[i]!, sky: ['#392018', '#351f3e', '#12394b', '#2d2448', '#203d34', '#172b57'][i % 6]!, ground: ['#71452d', '#6c3558', '#28566b', '#4d3c6c', '#3b6e56', '#354d77'][i % 6]!, lines: e.victory });
+const ecoBeats: Beat[] = ECOS.map((e, i) => ({ id: `eco_${e.biome}`, trigger: `boss:${e.biome}_boss`, title: e.eco, lines: e.victory, stage: ecoStage(e, i) }));
 const arrivalBeats: Beat[] = ECOS.map(e => ({ id: `chegada_${e.biome}`, trigger: `quest:${e.biome}_1`, title: `${FRONTIER[e.biome].name}`, lines: [
   `${e.vigia.name}, ${e.vigia.title}, observa você com esperança cansada.`, `— ${e.vigia.line}`, e.lore, `Dizem que ${e.boss.name} guarda o ${e.eco} a leste daqui. Siga a seta dourada.`] }));
 const memoriaBeats: Beat[] = ECOS.map(e => ({ id: `memoria_${e.biome}`, trigger: `quest:${e.biome}_5`, title: `Memória — ${MEMORIAS[e.biome].title}`, lines: MEMORIAS[e.biome].lines }));
@@ -325,7 +331,20 @@ export const BEATS: Beat[] = [
     'Abra a Crônica e inicie um novo Ciclo quando estiver pronto.',
   ] },
 ];
-export const beatsFor = (trigger: string) => BEATS.filter(b => b.trigger === trigger);
+const INTRO_FX: StageFx[] = ['duel', 'waves', 'spiral', 'void', 'shards', 'embers', 'rain', 'petals', 'stars', 'blessing', 'quake', 'flash', 'waves', 'void', 'shards', 'duel', 'spiral', 'blessing'];
+const BOSS_INTROS: Beat[] = STORY_BOSSES.map((b, i) => {
+  const lines = [
+    `${b.name} desperta pela primeira vez. O bioma inteiro muda de cor ao redor da arena.`,
+    `O ar se dobra: ${b.name} domina vinte técnicas, e nenhuma batalha contra ele será igual à anterior.`,
+    `“Viajante”, ruge o guardião. “Mostre se sua Canção consegue sobreviver ao meu ${INTRO_FX[i % INTRO_FX.length]}.”`,
+  ];
+  const stage: EpicScene = { id: `boss_intro_${b.id}`, title: `A primeira aparição de ${b.name}`, lines, fx: INTRO_FX[i % INTRO_FX.length]!, sky: ['#1b102c', '#102a3a', '#32152b', '#0b0b1c'][i % 4]!, ground: b.color, actors: [
+    { name: 'Você', pal: { skin: '#f0c8a0', hair: '#f0d040', body: '#3070c0', legs: '#2a3050' } },
+    { name: b.name, pal: { skin: '#d9b090', hair: b.color, body: b.color, legs: '#21152d' } },
+  ] };
+  return { id: `boss_intro_${b.id}`, trigger: `boss:intro:${b.id}`, title: `A chegada de ${b.name}`, lines, stage };
+});
+export const beatsFor = (trigger: string) => [...BEATS, ...BOSS_INTROS].filter(b => b.trigger === trigger);
 
 /* ───────────────────────────── Progresso ───────────────────────────── */
 export const ALL_ECO_BOSSES = ECOS.map(e => `${e.biome}_boss`);

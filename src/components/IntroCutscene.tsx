@@ -57,8 +57,9 @@ export function IntroCutscene({ scene }: { scene: number }) {
       c.beginPath(); c.ellipse(x + 2, y - 1, size * .32, size * .1, 0, 0, Math.PI * 2); c.fill();
       c.globalAlpha = alpha; c.drawImage(scaledSprite(img, i, size), Math.round(x - size / 2), Math.round(y - size)); c.restore();
     };
-    const sky = (stops: [number, string][]) => {
-      const gr = c.createLinearGradient(0, 0, 0, VH); stops.forEach(([o, col]) => gr.addColorStop(o, col));
+    const sky = (stops?: [number, string][]) => {
+      const safeStops: [number, string][] = Array.isArray(stops) && stops.length ? stops : [[0, "#060418"], [1, "#1a2050"]];
+      const gr = c.createLinearGradient(0, 0, 0, VH); safeStops.forEach(([o, col]) => gr.addColorStop(o, col));
       c.fillStyle = gr; c.fillRect(-20, -20, VW + 40, VH + 40);
     };
     const stars = (t: number, n = 60, alpha = 1, h = 90) => {
@@ -150,7 +151,7 @@ export function IntroCutscene({ scene }: { scene: number }) {
         const skies: [number, string][][] = [
           [[0, "#4a7ac0"], [1, "#f0d8a0"]], [[0, "#2a5a9a"], [1, "#9ad0f0"]], [[0, "#6a8ac8"], [1, "#e8f0ff"]], [[0, "#c87a3a"], [1, "#f8d890"]], [[0, "#2a4a3a"], [1, "#8ac080"]],
         ];
-        sky(skies[band]!);
+        sky(skies[band] ?? skies[0]);
         mountains(110, pan * .2, "rgba(60,80,120,.5)", 50, 1);
         mountains(130, pan * .45, "rgba(40,70,70,.7)", 40, 2);
         const pick = (x: number, y: number) => {

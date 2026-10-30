@@ -52,7 +52,7 @@ export function objectiveText(o: Objective): string {
 }
 
 /* ───────── Cenas (cutscenes) ───────── */
-export type StageFx = 'none' | 'flash' | 'rain' | 'embers' | 'stars' | 'quake' | 'petals';
+export type StageFx = 'none' | 'flash' | 'rain' | 'embers' | 'stars' | 'quake' | 'petals' | 'waves' | 'spiral' | 'shards' | 'void' | 'blessing' | 'duel';
 export interface SceneActor { name: string; pal: Palette }
 export interface EpicScene { id: string; title: string; lines: string[]; actors: SceneActor[]; fx: StageFx; sky: string; ground: string }
 const HERO: SceneActor = { name: 'Você', pal: { skin: '#f0c8a0', hair: '#f0d040', body: '#3070c0', legs: '#2a3050' } };

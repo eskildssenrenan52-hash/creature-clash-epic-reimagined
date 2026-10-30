@@ -183,12 +183,33 @@ export function islandTick(g: Game, dt: number) {
   r.tick -= dt; if (r.tick > 0) return; r.tick = 0.5;
   if (g.count(r.def.resources[0]!.item) >= questTarget(r.def)) complete(g, r.def, 0);
 }
+
+function islandBlessingBeat(def: IslandDef) {
+  const tint = def.accent;
+  return { id: `island_blessing_${def.id}`, trigger: 'island:victory', title: `A bênção de ${def.name}`, lines: [
+    `${def.name} se abre em luz: a deusa da ilha estava presa no coração do monólito.`,
+    `Ela toca sua testa e a maré, a areia e as estrelas se inclinam diante de você.`,
+    `“Leve minha bênção. Enquanto você lutar, esta ilha lembrará seu nome.”`,
+    `A bênção desperta uma nova força — e a ilha volta a cantar.`,
+  ], stage: { id: `island_blessing_${def.id}`, title: `A bênção de ${def.name}`, actors: [
+    { name: 'Você', pal: { skin: '#f0c8a0', hair: '#f0d040', body: '#3070c0', legs: '#2a3050' } },
+    { name: `Deusa de ${def.name}`, pal: { skin: '#f8ead0', hair: tint, body: tint, legs: '#32204a' } },
+  ], fx: 'blessing' as const, sky: '#111d3d', ground: def.land, lines: [
+    `${def.name} se abre em luz: a deusa da ilha estava presa no coração do monólito.`,
+    `Ela toca sua testa e a maré, a areia e as estrelas se inclinam diante de você.`,
+    `“Leve minha bênção. Enquanto você lutar, esta ilha lembrará seu nome.”`,
+    `A bênção desperta uma nova força — e a ilha volta a cantar.`,
+  ] } };
+}
+
 export function islandOnKill(g: Game, e: Enemy) {
   const r = g.island; if (!r || e.id !== r.bossId) return;
   r.bossId = -1; const b = r.def.boss;
   g.addItem(b.drop, b.dropQty); g.shake = 8;
   g.biomeBanner = { name: `${b.name} derrotado!`, t: 4 }; g.toast(b.lore, "#f4dc91");
   complete(g, r.def, 1);
+  const beat = islandBlessingBeat(r.def);
+  if (!g.seenBeats.has(beat.id)) { g.beatQueue.push(beat); if (!g.cutscene) g.nextBeat(); }
 }
 
 // ---------------------------------------------------------------- interação
@@ -361,6 +382,16 @@ export function renderSea(g: Game) {
 // ---------------------------------------------------------------- render das ilhas
 export function drawIslandProps(g: Game, c: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, wt: number) {
   const r = g.island!; const def = r.def;
+  // As árvores do Kaetram aparecem somente nas ilhas; o continente usa WorldArt.tree autoral.
+  const ring = [[-.42, -.31], [-.2, -.43], [.08, -.41], [.35, -.3], [-.46, -.04], [.46, .02], [-.38, .25], [-.12, .42], [.18, .4], [.4, .22]] as const;
+  const kind = def.id === 'coral' || def.id === 'oasis' ? 'palm' : def.id === 'aurora' ? 'pine spruce' : def.id === 'sakura' ? 'cherry' : 'tree';
+  const radius = r.span * TS * .42;
+  for (const [dx, dy] of ring) {
+    const tx = r.center.x + dx * radius, ty = r.center.y + dy * radius;
+    const gx = tx / TS, gy = ty / TS;
+    if (gx < x0 - 5 || gx > x1 + 5 || gy < y0 - 7 || gy > y1 + 5) continue;
+    g.art.islandTree(c, kind, tx, ty, wt, Math.max(.72, Math.min(1.08, r.span / 72)));
+  }
   for (const n of g.world.nodes) {
     if (n.respawn > 0 || n.tx < x0 - 1 || n.tx > x1 || n.ty < y0 - 1 || n.ty > y1) continue;
     const x = n.tx * TS + 8, y = n.ty * TS + 14, col = ITEMS[n.item]?.color ?? "#fff", pulse = 0.6 + Math.sin(wt * 3 + n.id) * 0.4;

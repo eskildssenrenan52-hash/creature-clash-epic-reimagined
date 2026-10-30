@@ -15,20 +15,7 @@ import { Modal, Section, Meter } from "@/components/GameModal";
 import { Button } from "@/components/ui/button";
 import { BUILDINGS, TREASURES } from "@/odyssey/exploration";
 import { W, H } from "@/odyssey/world";
-import { Game, VW, VH, BOSS_LOOK } from "@/odyssey/engine";
-import { directScene } from "@/odyssey/cine-director";
-
-/** Avança as falas no ritmo da cena (mínimo de 22 s por cena); tocar ainda adianta. */
-function CutsceneClock({ g }: { g: Game }) {
-  const cs = g.cutscene; const id = cs?.beat.id, i = cs?.i ?? 0;
-  useEffect(() => {
-    const c = g.cutscene; if (!c || c.i >= c.beat.lines.length - 1) return;
-    const per = (directScene(c.beat).total / c.beat.lines.length) * 1000;
-    const t = setTimeout(() => { const n = g.cutscene; if (n && n.beat.id === id && n.i === i) g.advanceCutscene(); }, per);
-    return () => clearTimeout(t);
-  }, [g, id, i]);
-  return null;
-}
+import { Game, VW, VH } from "@/odyssey/engine";
 import { ITEMS, NPCS, QUESTS, SPIRITS, STATUES, SHOP, type Slot, type Stats } from "@/odyssey/data";
 import { drawChar, drawItemIcon } from "@/odyssey/gfx";
 import { loadout, knows } from "@/odyssey/skill-play";
@@ -43,6 +30,7 @@ import { petsNewGame } from "@/odyssey/pet-play";
 import { PetsPanel } from "@/components/PetsPanel";
 import { drawKIcon, kImage } from "@/odyssey/kaetram";
 import { PawPrint } from "lucide-react";
+import { skipTutorial, startTutorial } from "@/odyssey/depthplay";
 
 export const Route = createFileRoute("/odyssey")({
   head: () => ({
@@ -106,6 +94,7 @@ export function OdysseyScreen() {
   const [fullscreen,setFullscreen]=useState(false);
   const [menuOpen,setMenuOpen]=useState(false);
   const [heroTab,setHeroTab]=useState<"stats"|"look">("stats");
+  const [tutorialMode,setTutorialMode]=useState<"none"|"dungeon"|"modals">("none");
   const panelRef = useRef<Panel>(null);
   panelRef.current = panel;
 
@@ -125,12 +114,14 @@ export function OdysseyScreen() {
       g.resize(width,height);
     };
     const observer=new ResizeObserver(resize);observer.observe(cv);resize();
+    // Força o primeiro frame: em aparelhos fracos a qualidade pode pular o frame 1.
+    try { g.render(); } catch (err) { console.error("Falha no primeiro frame", err); }
     const fullChange=()=>setFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange',fullChange);
     setHasSave(Game.hasSave());
     const mapT = window.setTimeout(() => setMapUrl(g.mapDataUrl()), 1200);
     g.onMapClick = () => setPanel("map");
-    let raf = 0, last = performance.now();
+    let raf = 0, last = performance.now(), firstFrame = true;
     // Laço protegido: um erro isolado num quadro nunca derruba o jogo, e o governador
     // de qualidade mede o intervalo real entre quadros (inclui GPU — o gargalo no celular).
     let errors = 0;
@@ -142,11 +133,22 @@ export function OdysseyScreen() {
       try {
         g.paused = panelRef.current !== null;
         g.update(dt);
-        if (g.quality.shouldRender()) g.render();
+        if (firstFrame || g.quality.shouldRender()) { firstFrame = false; g.render(); }
         if (raw < 250) g.quality.sample(raw);
         errors = 0;
       } catch (err) {
         if (++errors <= 3) console.error(err);
+        // Nunca deixe o jogador diante de um canvas vazio enquanto um asset ou frame recupera.
+        const fallback = cv.getContext("2d");
+        if (fallback) {
+          const w = Math.max(1, g.viewWidth), h = Math.max(1, g.viewHeight);
+          const bg = fallback.createLinearGradient(0, 0, 0, h); bg.addColorStop(0, "#101b2c"); bg.addColorStop(1, "#173b38");
+          fallback.setTransform(1, 0, 0, 1, 0, 0); fallback.fillStyle = bg; fallback.fillRect(0, 0, w, h);
+          fallback.fillStyle = "#f6d18b"; fallback.font = "bold 12px monospace"; fallback.textAlign = "center";
+          fallback.fillText("Preparando sua jornada…", w / 2, h / 2);
+          fallback.fillStyle = "rgba(246,209,139,.35)"; fallback.fillRect(w * .25, h / 2 + 12, w * .5, 3);
+          fallback.fillStyle = "#f6d18b"; fallback.fillRect(w * .25, h / 2 + 12, w * (.25 + ((performance.now() / 1000 % 2) / 2) * .5), 3);
+        }
       }
     };
     const onVis = () => { last = performance.now(); };
@@ -154,7 +156,7 @@ export function OdysseyScreen() {
     raf = requestAnimationFrame(loop);
     if (import.meta.env.DEV) (window as unknown as { __game?: unknown }).__game = g;
     // O painel do jogo atualiza menos vezes em aparelhos fracos (a tela do jogo segue fluida).
-    let hud = 0; const iv = setInterval(() => { if (document.hidden) return; hud++; if (g.started && hud % 4 === 0) epicTick(g); if (hud % g.quality.hudEvery() === 0) setTick((x) => x + 1); }, 120);
+    let hud = 0; const iv = setInterval(() => { if (document.hidden) return; hud++; if (g.started && hud % 4 === 0) epicTick(g); if (g.tutorialModalPending) setTutorialMode("modals"); if (hud % g.quality.hudEvery() === 0) setTick((x) => x + 1); }, 120);
     const down = (e: KeyboardEvent) => {
       if (!g.started) return;
       g.audio.init();
@@ -196,7 +198,14 @@ export function OdysseyScreen() {
     if (!g) return;
     if (load) g.load();
     g.started = true; g.audio.init(); setTitle(false);
-    if (!load) { petsNewGame(g); g.toast("Fale com Gorm na vila ou comece seu lar na clareira a leste.", "#ffd040"); g.fireBeats("new"); epicNewGame(g); }
+    if (!load) {
+      petsNewGame(g); g.fireBeats("new"); epicNewGame(g);
+      if (!g.tutorialDone) { startTutorial(g); setTutorialMode("dungeon"); setPanel(null); }
+      else { setPanel("quest"); g.toast("Fale com Gorm na vila ou comece seu lar na clareira a leste.", "#ffd040"); }
+    } else {
+      setPanel(g.tutorialModalPending ? null : "quest");
+      if (g.tutorialModalPending) setTutorialMode("modals");
+    }
   };
   const onMouse = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!g || !g.started) return;
@@ -376,14 +385,19 @@ export function OdysseyScreen() {
         {g && !title && g.cutscene && (
           <div className="cutscene absolute inset-0" onClick={() => g.advanceCutscene()} role="dialog" aria-label={g.cutscene.beat.title}>
             <div className="cutscene-bar cutscene-top"><span>{g.cutscene.beat.title}</span></div>
-            <CinemaStage key={g.cutscene.beat.id} scene={stageFor(g.cutscene.beat.id, g.cutscene.beat.stage)} line={g.cutscene.i} beat={g.cutscene.beat} look={g.cutscene.beat.trigger.startsWith("boss:") ? BOSS_LOOK[g.cutscene.beat.trigger.slice(5)] ?? null : null} />
-            <CutsceneClock g={g} />
+            <CinemaStage key={g.cutscene.beat.id} scene={stageFor(g.cutscene.beat.id, g.cutscene.beat.stage)} line={g.cutscene.i} />
             <div className="tap-to-continue" aria-hidden>Toque para continuar</div>
             <div className="cutscene-body"><p key={`${g.cutscene.beat.id}-${g.cutscene.i}`} className="cutscene-line">{g.cutscene.beat.lines[g.cutscene.i]}</p></div>
             <div className="cutscene-bar cutscene-bottom"><span className="opacity-70">{g.cutscene.i + 1}/{g.cutscene.beat.lines.length}</span>
               <span className="flex gap-2"><Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); g.advanceCutscene(true); }}>Pular</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); g.advanceCutscene(); }}>{g.cutscene.i + 1 < g.cutscene.beat.lines.length ? "Continuar" : "Fechar"}<ChevronRight size={14}/></Button></span></div>
           </div>
         )}
+        {g && !title && tutorialMode !== "none" && <TutorialOverlay key={tutorialMode} mode={tutorialMode} g={g}
+          onSkip={() => {
+            if (tutorialMode === "dungeon") { skipTutorial(g); setTutorialMode("modals"); }
+            else { g.tutorialModalPending = false; g.tutorialModalDone = true; g.save(); setTutorialMode("none"); setPanel("quest"); }
+          }}
+          onFinish={() => { g.tutorialModalPending = false; g.tutorialModalDone = true; g.save(); setTutorialMode("none"); setPanel("quest"); }} />}
         {title && (
           <div className="title-screen absolute inset-0">
             <img src={worldArt} width={1536} height={864} alt="A Árvore de Mana, a vila e seus jardins" className="title-art"/>
@@ -454,19 +468,58 @@ export function OdysseyScreen() {
   );
 }
 
+function TutorialOverlay({ mode, g, onSkip, onFinish }: { mode: "dungeon" | "modals"; g: Game; onSkip: () => void; onFinish: () => void }) {
+  const [step, setStep] = useState(0);
+  const [ack, setAck] = useState(false);
+  const modalSteps = [
+    ["HUD e missão", "A barra superior mostra nível, ouro, HP, MP e XP. O painel SUA JORNADA acompanha objetivos ativos e avisa quando uma missão está pronta."],
+    ["Mochila e itens", "Abra Inventário pelo botão da mochila ou I. Clique numa poção para usar, em equipamento para vestir e nos itens para ler seus efeitos."],
+    ["Herói, atributos e aparência", "Abra Herói ou C. Use os pontos ganhos ao subir de nível em Força, Destreza, Vitalidade, Inteligência e Sabedoria. A aba Aparência reúne skins, olhos, cabelos, capas e chapéus."],
+    ["Missões e crônicas", "Missões reúne objetivos disponíveis. Crônica registra os Atos e memórias; Grande Crônica mostra a progressão épica e escolhas futuras."],
+    ["Mapa e descobertas", "Mapa ou M mostra o atlas e os destinos desbloqueados. Descobertas guarda lugares, baús, entradas e segredos já encontrados."],
+    ["Bestiário e grimório", "Bestiário registra inimigos e criaturas conhecidas. Grimório permite aprender, equipar e testar habilidades especiais."],
+    ["Pets e personalização", "Pets ou P administra ovos, equipe e companheiros. Aparência permite combinar o visual original com sprites e cosméticos Kaetram."],
+    ["Lar, cultivo e oficinas", "Cultivar, Construir, Minha casa e Oficinas cuidam de plantações, estruturas, móveis, forja, alquimia, carpintaria e mercado."],
+  ] as const;
+  const floor = Math.max(1, Math.min(3, g.tutorialFloor || 1));
+  const dungeonCopy = floor === 1
+    ? ["Andar 1 · Mover e atacar", "Use WASD, setas ou o joystick para andar. Mire em uma criatura e use Espaço, o botão de espada ou toque no inimigo para atacar. A escada abre quando a sala estiver segura."]
+    : floor === 2
+      ? ["Andar 2 · Itens e magia", "Use a poção e o éter no rodapé quando HP ou MP baixarem. O botão de magia e as teclas 1–5 lançam espíritos e habilidades. Mantenha distância e ataque entre os golpes."]
+      : ["Andar 3 · Atributos e chefe", "O Guardião tem fases e efeitos especiais. Ataque, mova-se para evitar telegráficos, use poções e abra Herói (C) para gastar pontos de atributo quando subir de nível."];
+  const title = mode === "dungeon" ? dungeonCopy[0] : modalSteps[step]![0];
+  const body = mode === "dungeon" ? dungeonCopy[1] : modalSteps[step]![1];
+  if (mode === "dungeon" && ack) return <div className="absolute top-2 left-1/2 z-40 -translate-x-1/2 pointer-events-none"><Button variant="game" className="pointer-events-auto game-panel text-[10px]" onClick={() => setAck(false)}>Mostrar instrução · andar {floor}/3</Button></div>;
+  return <div className="absolute inset-0 z-40 flex items-end justify-center p-3 pointer-events-none" role="dialog" aria-label="Tutorial de primeira jornada">
+    <div className="game-panel pointer-events-auto w-full max-w-xl border border-primary/70 bg-background/95 p-4 shadow-2xl">
+      <div className="flex items-center justify-between gap-3 text-[11px] uppercase tracking-wider text-primary"><span>{mode === "dungeon" ? `Treino de Aventureiro · ${floor}/3` : `Guia dos modais · ${step + 1}/${modalSteps.length}`}</span><span className="text-muted-foreground">Primeira jornada</span></div>
+      <h2 className="mt-1 text-xl text-foreground">{title}</h2>
+      <p className="mt-2 font-body text-lg leading-6 text-foreground/90">{body}</p>
+      {mode === "modals" && <div className="mt-3 flex flex-wrap gap-1 text-[10px] text-muted-foreground">{modalSteps.map(([label], i) => <span key={label} className={`border px-1.5 py-0.5 ${i === step ? "border-primary text-primary" : "border-border"}`}>{label}</span>)}</div>}
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button variant="outline" onClick={() => { g.audio.sfx("ui"); onSkip(); }}>{mode === "dungeon" ? "Pular dungeon" : "Pular guia"}</Button>
+        {mode === "dungeon" ? <Button onClick={() => { g.audio.sfx("ui"); setAck(true); }}>Entendi · continuar</Button> : step + 1 < modalSteps.length ? <Button onClick={() => { g.audio.sfx("ui"); setStep((v) => v + 1); }}>Próximo modal <ChevronRight size={15}/></Button> : <Button onClick={() => { g.audio.sfx("level"); onFinish(); }}>Entrar no mundo <ChevronRight size={15}/></Button>}
+      </div>
+    </div>
+  </div>;
+}
+
 function Row({ id, qty, right, onClick }: { id: string; qty?: number; right: string; onClick: () => void }) {
   return <Button variant="game" onClick={onClick} title={ITEMS[id].desc} className="item-row"><Icon id={id} size={24} /><span className="flex-1">{ITEMS[id].name}{qty && qty > 1 ? ` ×${qty}` : ""}</span><span className="item-price">{right}</span></Button>;
 }
 
 function QuestBook({ g, onClose }: { g: Game; onClose: () => void }) {
-  const [tab, setTab] = useState<"active" | "available" | "done">("active");
+  // A campanha deve apresentar os Atos futuros desde o início; os pré-requisitos
+  // continuam protegendo a ativação, mas nunca escondem o conteúdo do jogador.
+  const [tab, setTab] = useState<"active" | "available" | "done">("available");
   const [cat, setCat] = useState<"all" | "main" | "folk" | "seal">("all");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(40);
   const npcName = (id: string) => NPCS.find((n) => n.id === id)?.name ?? "";
   const list = QUESTS.filter((x) => {
     const st = g.questStatus[x.id];
-    if (tab === "active" ? st !== "active" : tab === "done" ? st !== "done" : st || !g.questUnlocked(x)) return false;
+    const forcedStory = x.main && (x.act ?? 0) >= 2;
+    if (tab === "active" ? st !== "active" : tab === "done" ? st !== "done" : st || (!g.questUnlocked(x) && !forcedStory)) return false;
     const folk = x.giver.startsWith("folk_"), seal = x.id.endsWith("_seal") || x.id === "folk_choir_1";
     if (cat === "main" && !x.main) return false;
     if (cat === "folk" && (!folk || seal)) return false;
@@ -482,8 +535,11 @@ function QuestBook({ g, onClose }: { g: Game; onClose: () => void }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar missão ou morador…" /></div>
         <div className="quest-count">{list.length} missões</div>
         {list.slice(0, limit).map((x) => (
-          <div key={x.id} className="quest-entry"><div className="quest-entry-title">{x.main ? "★ " : ""}{x.title}<span>{npcName(x.giver)}</span></div>
-            <div className="quest-entry-desc">{x.desc}</div>{g.questStatus[x.id] === "active" && <div className="quest-entry-prog">{g.questReady(x) ? "✔ Retorne a quem pediu" : g.questProgressText(x)}</div>}</div>
+          <div key={x.id} className="quest-entry"><div className="quest-entry-title">{x.main ? "★ " : ""}{x.title}<span>{npcName(x.giver)}{x.act ? ` · Ato ${x.act}` : ""}</span></div>
+            <div className="quest-entry-desc">{x.desc}</div>
+            {g.questStatus[x.id] === "active" && <div className="quest-entry-prog">{g.questReady(x) ? "✔ Retorne a quem pediu" : g.questProgressText(x)}</div>}
+            {tab === "available" && x.main && x.act && !g.questUnlocked(x) && <div className="quest-entry-prog text-muted-foreground">🔒 Apresentada agora · será ativada quando a campanha alcançar este ato</div>}
+          </div>
         ))}
         {list.length > limit && <button className="quest-more" onClick={() => setLimit(limit + 40)}>Mostrar mais</button>}
       </div>

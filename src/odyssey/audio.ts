@@ -12,6 +12,23 @@ const SCALES: Partial<Record<Biome, { root: number; scale: number[]; tempo: numb
 const MELODY = [0, 2, 4, 2, 5, 4, 2, 1, 0, 4, 7, 6, 5, 4, 2, -1, 0, 2, 4, 7, 9, 7, 5, 4, 2, 4, 5, 2, 1, 2, 0, -1];
 const BASS = [0, 0, 5, 5, 3, 3, 4, 4];
 
+const MUSIC: Record<string, string> = {
+  plains: "music/meadowofthepast.mp3", meadow: "music/meadowofthepast.mp3", sunflower: "music/meadowofthepast.mp3", lavender: "music/meadowofthepast.mp3",
+  forest: "music/forest.mp3", autumn: "music/forest.mp3", jungle: "music/jungle.mp3", bamboo: "music/jungle2.mp3", sakura: "music/meadowofthepast.mp3",
+  desert: "music/desert.mp3", oasis: "music/desert2.mp3", amber: "music/desert3.mp3",
+  cave: "music/cave.mp3", prism: "music/cave.mp3", moonwood: "music/codingroom.mp3", mushroom: "music/spookyship.mp3", spores: "music/spookyship.mp3",
+  mountain: "music/cave.mp3", aurora: "music/meadowofthepast.mp3",
+  volcanic: "music/lavaland.mp3", obsidian: "music/lavaland.mp3", thunder: "music/lavaland.mp3",
+  coast: "music/beach.mp3", coral: "music/beach2.mp3", lotus: "music/underwater.mp3", mangrove: "music/jungle.mp3", swamp: "music/underwater.mp3",
+  ruins: "music/codingroom.mp3", marble: "music/codingroom.mp3", crimson: "music/boss.mp3",
+};
+const SFX_FILES: Partial<Record<Sfx, string | string[]>> = {
+  hit: ["sounds/hit1.mp3", "sounds/hit2.mp3"], swing: "sounds/hit2.mp3", hurt: "sounds/hurt.mp3", fire: "sounds/firefox.mp3",
+  ice: "sounds/hit2.mp3", wind: "sounds/teleport.mp3", light: "sounds/achievement.mp3", heal: "sounds/heal.mp3", pickup: "sounds/loot.mp3",
+  level: "sounds/achievement.mp3", coin: "sounds/loot.mp3", boss: "sounds/boss.mp3", die: "sounds/death.mp3", ui: "sounds/chat.mp3",
+  bow: "sounds/hit1.mp3", warp: "sounds/teleport.mp3", craft: "sounds/mining1.mp3", explode: "sounds/hit2.mp3",
+};
+
 export class Audio {
   ctx: AudioContext | null = null;
   declare master: GainNode;
@@ -22,9 +39,13 @@ export class Audio {
   boss = false;
   timer: number | null = null;
   muted = false;
+  private currentMusic: HTMLAudioElement | null = null;
+  private currentTrack = "";
+  private fallbackSynth = false;
+  private readonly assetBase = "/kaetram/audio";
 
   init() {
-    if (this.ctx) { void this.ctx.resume(); return; }
+    if (this.ctx) { void this.ctx.resume(); this.syncMusic(); return; }
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
@@ -34,16 +55,45 @@ export class Audio {
     this.musicGain.gain.value = 0.22;
     this.musicGain.connect(this.master);
     this.nextTime = this.ctx.currentTime + 0.1;
-    this.timer = window.setInterval(() => this.schedule(), 50);
+    this.timer = window.setInterval(() => { this.syncMusic(); this.schedule(); }, 120);
+    this.syncMusic();
   }
   toggleMute() {
     this.muted = !this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.5;
+    if (this.muted) this.currentMusic?.pause();
+    else { this.syncMusic(); void this.currentMusic?.play().catch(() => undefined); }
   }
   destroy() {
     if (this.timer) clearInterval(this.timer);
+    this.currentMusic?.pause();
+    this.currentMusic = null;
+    this.currentTrack = "";
     void this.ctx?.close();
     this.ctx = null;
+  }
+  private asset(path: string) { return `${this.assetBase}/${path}`; }
+  private playClip(path: string, volume = 0.65) {
+    if (this.muted) return;
+    const clip = new window.Audio(this.asset(path));
+    clip.volume = volume;
+    clip.preload = "auto";
+    void clip.play().catch(() => undefined);
+    clip.addEventListener("ended", () => { clip.src = ""; }, { once: true });
+  }
+  private trackForState() { return this.boss ? "music/boss.mp3" : (MUSIC[this.biome] ?? MUSIC["forest"]!); }
+  /** Troca a trilha somente quando o bioma ou a batalha mudam; os arquivos são todos locais. */
+  syncMusic() {
+    if (!this.ctx || this.muted) return;
+    const track = this.trackForState();
+    if (track === this.currentTrack && this.currentMusic) return;
+    this.currentMusic?.pause();
+    this.currentMusic = new window.Audio(this.asset(track));
+    this.currentMusic.loop = true;
+    this.currentMusic.volume = 0.32;
+    this.currentTrack = track;
+    this.fallbackSynth = false;
+    void this.currentMusic.play().catch(() => { this.fallbackSynth = true; });
   }
   private note(freq: number, t: number, dur: number, type: OscillatorType, vol: number, dest: AudioNode) {
     const c = this.ctx; if (!c) return;
@@ -56,7 +106,7 @@ export class Audio {
     o.start(t); o.stop(t + dur + 0.02);
   }
   private schedule() {
-    const c = this.ctx; if (!c) return;
+    const c = this.ctx; if (!c || !this.fallbackSynth) return;
     const sc = SCALES[this.biome] ?? SCALES.forest;
     if (!sc) return;
     const tempo = this.boss ? 160 : sc.tempo;
@@ -98,6 +148,12 @@ export class Audio {
   }
   sfx(k: Sfx) {
     const c = this.ctx; if (!c || this.muted) return;
+    const local = SFX_FILES[k];
+    if (local) {
+      const files = Array.isArray(local) ? local : [local];
+      this.playClip(files[Math.floor(Math.random() * files.length)]!, k === "boss" ? 0.9 : 0.7);
+      return;
+    }
     const t = c.currentTime;
     switch (k) {
       case "swing": this.noise(t, 0.08, 0.15, 2500); break;

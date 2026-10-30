@@ -1,9 +1,9 @@
 // Liga o Abismo do Cântico e os Templos Profundos ao motor (entrada, escadas, chefes, luz e salvamento).
 import type { Game, Enemy } from './engine';
 import { BEASTS, pickBeast } from './bestiary';
-import { ABYSS_DOOR, ABYSS_ENTRY, ABYSS_FLOORS, ABYSS_BOSS_LOOK, FINAL_BOSS, GUARDIANS, checkpoints, generateFloor, isGuardianFloor, type DungeonFloor } from './dungeon';
+import { ABYSS_DOOR, ABYSS_ENTRY, ABYSS_FLOORS, ABYSS_BOSS_LOOK, FINAL_BOSS, GUARDIANS, checkpoints, generateFloor, isGuardianFloor, type DungeonFloor, type Theme } from './dungeon';
 import { TEMPLES, templeDoor, templeFootprint, generateTempleFloor, drawTemple, drawAbyssGate, drawStairs, drawWallTorch, type Temple, type StairStyle } from './depths';
-import { QUESTS, type NpcDef } from './data';
+import { QUESTS, type BossDef, type NpcDef } from './data';
 import { T, TS, W, H, type World } from './world';
 import { cycleBonus } from './story';
 import { drawTreasure } from './scenery';
@@ -16,10 +16,30 @@ import { sagaDepthAction, sagaSurfaceAction, drawSagaStairs, sagaLights, sagaDar
 
 for (const [i, r] of ALL_REALMS.entries()) ITEMS[r.relic] ??= { id: r.relic, name: r.relicName, type: 'amulet', bonus: { str: 4 + i * 2, int: 4 + i * 2, vit: 3 + i * 2, hp: 60 + i * 40, mp: 30 + i * 20 }, desc: `Relíquia oculta do ${r.name}.`, color: r.color, price: 2000 + i * 1500 };
 
-export interface DepthState { kind: 'abyss' | 'temple'; floor: number; temple?: Temple; data: DungeonFloor; stair: StairStyle }
+export interface DepthState { kind: 'abyss' | 'temple' | 'tutorial'; floor: number; temple?: Temple; data: DungeonFloor; stair: StairStyle }
 
 export const ABYSS_KEEPER: NpcDef = { id: 'abyss_keeper', name: 'Guardião do Abismo', title: 'Vigia dos Cem Andares', tx: ABYSS_DOOR.tx, ty: ABYSS_DOOR.ty, pal: { skin: '#d8c8b8', hair: '#3a2a5a', body: '#2a1a40', legs: '#120a20', accent: '#c78bff' }, lines: [] };
 const ABYSS_STAIRS: StairStyle[] = ['roots', 'fungal', 'marble', 'coral', 'sand', 'frost', 'lava', 'spiral', 'crystal', 'bones'];
+
+/** Tutorial inicial: uma rota curta que ensina os controles sem misturar o progresso do Abismo. */
+export const TUTORIAL_BOSS_ID = 'tutorial_gatekeeper';
+export const TUTORIAL_BOSS_LOOK: Record<string, { kind: 'golem'; tint: string; scale: number }> = { [TUTORIAL_BOSS_ID]: { kind: 'golem', tint: '#7ed6ff', scale: 2.35 } };
+const TUTORIAL_THEME: Theme = {
+  name: 'Cripta do Primeiro Eco', floor: T.CAVE, wall: T.CWALL, deco: T.CRYSTAL, biome: 'cave',
+  enemies: ['goblin', 'mushroom', 'sporeling'], color: '#7ed6ff', lore: 'Uma pequena cripta onde os primeiros passos viram memória.',
+};
+
+export function tutorialBoss(tx: number, ty: number): BossDef {
+  return { id: TUTORIAL_BOSS_ID, name: 'Guardião do Primeiro Eco', biome: 'cave', tx, ty, hp: 650, atk: 13, xp: 360, gold: 120, color: '#7ed6ff', minion: 'goblin', reward: ['hi_potion', 'ether'] };
+}
+
+export function tutorialFloorData(floor: number): DungeonFloor {
+  const data = generateFloor(floor, { theme: TUTORIAL_THEME, seed: 9317 + floor * 177, size: { w: 36, h: 27 }, level: Math.max(1, floor), idPrefix: `tutorial-${floor}`, eliteBonus: 0 });
+  const count = floor === 1 ? 4 : floor === 2 ? 6 : 4;
+  data.spawns = data.spawns.slice(0, count).map((s) => ({ ...s, level: Math.max(1, Math.min(3, s.level)), elite: false }));
+  if (floor === 3) data.boss = tutorialBoss(data.stairs.tx, data.stairs.ty - 2);
+  return data;
+}
 
 /** Esculpe as entradas no mapa de superfície: o Portão do Abismo em Potos e um templo por bioma. */
 export function carveEntrances(world: World) {
@@ -47,10 +67,10 @@ function populate(g: Game, d: DungeonFloor, strength: number, abyss = false) {
     out.push(e);
   }
   if (d.boss && !g.bossesDone.has(d.boss.id)) {
-    const b = d.boss, look = ABYSS_BOSS_LOOK[b.id]!;
+    const b = d.boss, look = ABYSS_BOSS_LOOK[b.id] ?? TUTORIAL_BOSS_LOOK[b.id] ?? { kind: b.minion, tint: b.color, scale: 2 };
     const e = g.makeEnemy(look.kind, b.tx * TS + 8, b.ty * TS + 8, 1);
     e.hp = e.maxhp = b.hp; e.atk = b.atk; e.def = 6 + Math.floor(d.floor / 3); e.xp = b.xp; e.gold = b.gold; e.speed = 30; e.level = d.floor + 8;
-    e.boss = { def: b, active: false, phase: 1, patT: 2, charge: 0, cvx: 0, cvy: 0 };
+    e.boss = { def: b, active: false, phase: 1, patT: 2, attackIndex: 0, charge: 0, cvx: 0, cvy: 0 };
     out.push(e);
   }
   return out;
@@ -63,7 +83,58 @@ function enter(g: Game, state: DepthState, strength: number) {
   g.depth = state; g.world = state.data.world;
   g.enemies = populate(g, state.data, strength, state.kind === 'abyss'); g.activeBoss = null; g.audio.boss = false;
   g.p.x = state.data.start.tx * TS + 8; g.p.y = (state.data.start.ty + 1) * TS + 8;
-  g.clearTransition(); g.biome = state.data.theme.biome;
+  g.clearTransition(); g.biome = state.data.theme.biome; g.audio.biome = state.data.theme.biome;
+}
+
+export function enterTutorialFloor(g: Game, floor: number) {
+  floor = Math.max(1, Math.min(3, floor));
+  enter(g, { kind: 'tutorial', floor, data: tutorialFloorData(floor), stair: 'crystal' }, 1);
+  g.tutorialActive = true;
+  g.tutorialFloor = floor;
+  g.p.hp = g.maxHp(); g.p.mp = g.maxMp();
+  g.audio.boss = false;
+  g.biomeBanner = { name: `Treino de Aventureiro · Andar ${floor}/3`, t: 4 };
+  g.toast(floor === 1 ? 'Aprenda a se mover e atacar. A escada só abre quando a sala estiver segura.' : floor === 2 ? 'Use poções, éter e magia. Posicionamento também é defesa.' : 'O Guardião aguarda no terceiro andar. Gaste seus pontos de atributo quando subir de nível.', '#bfefff');
+}
+
+export function startTutorial(g: Game) {
+  g.tutorialActive = true;
+  g.tutorialDone = false;
+  g.tutorialModalPending = false;
+  g.tutorialModalDone = false;
+  g.tutorialFloor = 1;
+  enterTutorialFloor(g, 1);
+}
+
+export function skipTutorial(g: Game) {
+  if (g.depth?.kind === 'tutorial') leaveDepth(g, true);
+  g.tutorialActive = false;
+  g.tutorialDone = true;
+  g.tutorialFloor = 0;
+  g.tutorialModalPending = true;
+  g.p.hp = g.maxHp(); g.p.mp = g.maxMp();
+  g.audio.boss = false;
+  g.toast('Treino pulado. O mundo principal está aberto; o guia dos modais aparecerá agora.', '#ffe39a');
+  g.save();
+}
+
+export function completeTutorial(g: Game) {
+  if (g.depth?.kind === 'tutorial') leaveDepth(g, true);
+  g.tutorialActive = false;
+  g.tutorialDone = true;
+  g.tutorialFloor = 0;
+  g.tutorialModalPending = true;
+  g.p.points = Math.max(g.p.points, 3);
+  g.p.hp = g.maxHp(); g.p.mp = g.maxMp();
+  g.audio.boss = false;
+  g.toast('Treino concluído! Bem-vindo às Terras de Mana.', '#a0ffa0');
+  g.save();
+}
+
+export function restartTutorialFloor(g: Game) {
+  const floor = Math.max(1, Math.min(3, g.tutorialFloor || 1));
+  if (g.depth?.kind === 'tutorial') leaveDepth(g, true);
+  enterTutorialFloor(g, floor);
 }
 
 export function enterAbyss(g: Game, floor: number) {
@@ -118,10 +189,34 @@ export function openAbyssGate(g: Game) {
 
 const near = (g: Game, tx: number, ty: number, r = 22) => Math.hypot(g.p.x - tx * TS - 8, g.p.y - ty * TS - 8) < r;
 
+export function tutorialDepthAction(g: Game, run: boolean): string {
+  const d = g.depth;
+  if (!d || d.kind !== 'tutorial') return '';
+  const data = d.data;
+  for (const c of data.chests) if (near(g, c.tx, c.ty)) {
+    if (run) g.claimChest(c.id, c.gold, c.item, c.qty, 'Baú do treinamento');
+    return g.openedChests.has(c.id) ? 'Baú vazio' : 'E · Abrir baú';
+  }
+  if (near(g, data.stairs.tx, data.stairs.ty, 22)) {
+    const remaining = g.enemies.some((e) => e.alive);
+    if (d.floor < 3) {
+      if (remaining) { if (run) g.toast('A escada está selada. Derrote todos os inimigos deste andar.', '#ffb060'); return 'Escada selada · derrote os inimigos'; }
+      if (run) enterTutorialFloor(g, d.floor + 1);
+      return `E · Ir para o andar ${d.floor + 1}`;
+    }
+    if (!g.bossesDone.has(TUTORIAL_BOSS_ID)) { if (run) g.toast('O Guardião ainda está de pé. Ataque-o e use seus itens quando precisar.', '#ff8080'); return 'Escada selada pelo Guardião'; }
+    if (run) completeTutorial(g);
+    return 'E · Entrar nas Terras de Mana';
+  }
+  if (d.floor === 1 && near(g, data.start.tx, data.start.ty, 20)) return 'Treino ativo · use o botão Pular tutorial se quiser sair';
+  return '';
+}
+
 /** Interação dentro das profundezas: escadas, baús e relíquias. Retorna o texto do aviso ou executa. */
 export function depthAction(g: Game, run: boolean): string {
   const d = g.depth; if (!d) return '';
   const data = d.data;
+  if (d.kind === 'tutorial') return tutorialDepthAction(g, run);
   const sg = sagaDepthAction(g, run); if (sg) return sg;
   const sec = secretDepthAction(g, run); if (sec) return sec;
   const prop = propAction(g, run); if (prop) return prop;
@@ -164,7 +259,7 @@ export function drawDepth(g: Game, c: CanvasRenderingContext2D, x0: number, y0: 
   const data = d.data, vis = (x: number, y: number) => x >= x0 - 1 && x <= x1 + 1 && y >= y0 - 1 && y <= y1 + 1;
   if (drawSagaStairs(g, c, wt)) { for (const ch of data.chests) if (vis(ch.tx, ch.ty)) drawTreasure(c, ch.tx * TS + 8, ch.ty * TS + 12, g.openedChests.has(ch.id), wt); for (const t of data.torches) if (vis(t.tx, t.ty)) drawWallTorch(c, t.tx, t.ty, wt); return; }
   drawStairs(c, d.stair, data.start.tx, data.start.ty, false, wt);
-  if (d.kind === 'abyss' && d.floor < ABYSS_FLOORS) drawStairs(c, d.stair, data.stairs.tx, data.stairs.ty, true, wt, !!data.boss && !g.bossesDone.has(data.boss.id));
+  if ((d.kind === 'abyss' && d.floor < ABYSS_FLOORS) || d.kind === 'tutorial') drawStairs(c, d.stair, data.stairs.tx, data.stairs.ty, true, wt, d.kind === 'tutorial' ? g.enemies.some((e) => e.alive) : !!data.boss && !g.bossesDone.has(data.boss.id));
   if (d.kind === 'temple' || d.floor >= ABYSS_FLOORS) drawTreasure(c, data.stairs.tx * TS + 8, data.stairs.ty * TS + 12, g.openedChests.has(`${d.temple?.id}-relic`), wt);
   for (const ch of data.chests) if (vis(ch.tx, ch.ty)) drawTreasure(c, ch.tx * TS + 8, ch.ty * TS + 12, g.openedChests.has(ch.id), wt);
   for (const t of data.torches) if (vis(t.tx, t.ty)) drawWallTorch(c, t.tx, t.ty, wt);

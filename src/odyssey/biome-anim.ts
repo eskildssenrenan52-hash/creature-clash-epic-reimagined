@@ -7,6 +7,35 @@ import type { Game } from './engine';
 type Ctx = CanvasRenderingContext2D;
 const wrap = (v: number, m: number) => ((v % m) + m) % m;
 
+export const BOSS_ARENA_BIOMES = [
+  { name: 'Catedral de Raízes', sky: 'rgba(36,96,70,.14)', mote: '#b8ff9c', mode: 'roots' },
+  { name: 'Maré de Vidro', sky: 'rgba(64,170,220,.16)', mote: '#d8fbff', mode: 'tide' },
+  { name: 'Jardim de Cinzas', sky: 'rgba(170,54,36,.16)', mote: '#ffb060', mode: 'ash' },
+  { name: 'Cofre das Estrelas', sky: 'rgba(90,62,190,.16)', mote: '#e5d4ff', mode: 'stars' },
+  { name: 'Pântano Prismático', sky: 'rgba(50,210,170,.13)', mote: '#8ffff0', mode: 'prism' },
+  { name: 'Vazio Ressonante', sky: 'rgba(20,8,50,.25)', mote: '#b080ff', mode: 'void' },
+] as const;
+
+/** Micro-bioma de arena: cada chefe recebe uma paisagem de batalha persistente e própria. */
+export function bossArenaLife(g: Game, c: Ctx) {
+  const boss = g.activeBoss?.boss; if (!boss) return;
+  let n = 0; for (const ch of boss.def.id) n = (n * 31 + ch.charCodeAt(0)) >>> 0;
+  const arena = BOSS_ARENA_BIOMES[n % BOSS_ARENA_BIOMES.length]!;
+  const w = g.viewWidth, h = g.viewHeight, t = g.clock;
+  c.save(); c.fillStyle = arena.sky; c.fillRect(0, 0, w, h); c.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 18; i++) {
+    const seed = (n + i * 37) % 997, x = wrap(seed * 17 + Math.sin(t * (0.3 + i * .01) + seed) * 30, w), y = wrap(seed * 11 + Math.cos(t * .4 + seed) * 20, h);
+    c.fillStyle = arena.mote; c.globalAlpha = .2 + Math.abs(Math.sin(t * 2 + i)) * .45;
+    if (arena.mode === 'roots') { c.fillRect(x, h - 25 - (i % 3) * 7, 2, 25); c.fillRect(x - 5, h - 27 - (i % 3) * 7, 12, 2); }
+    else if (arena.mode === 'tide') { c.strokeStyle = arena.mote; c.beginPath(); c.ellipse(x, y, 14 + Math.sin(t + i) * 5, 3, 0, 0, Math.PI * 2); c.stroke(); }
+    else if (arena.mode === 'ash') { c.fillRect(x, y, 2 + i % 3, 2 + i % 2); }
+    else if (arena.mode === 'stars') { c.fillRect(x, y, 2, 2); c.fillRect(x - 3, y + 1, 8, 1); }
+    else if (arena.mode === 'prism') { c.save(); c.translate(x, y); c.rotate(t + i); c.fillRect(-3, -3, 6, 6); c.restore(); }
+    else { c.beginPath(); c.arc(w / 2, h / 2, 20 + ((t * 18 + i * 13) % 100), t + i, t + i + 1.3); c.stroke(); }
+  }
+  c.restore();
+}
+
 /** Água viva: brilhos correndo com a corrente, anéis de ondulação nas margens e bolhas de lava. */
 export function waterLife(g: Game, c: Ctx, x0: number, y0: number, x1: number, y1: number, wt: number) {
   for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
