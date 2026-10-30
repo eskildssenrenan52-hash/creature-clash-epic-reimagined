@@ -1,5 +1,4 @@
 import { epicOnKill, epicOnBiome, epicSave, epicLoad, shopPriceMult } from "./epic-play";
-import { BOSS_MOVES, BOSS_DAMAGE_MULT, bossSequence, type BossCtx } from "./boss-moves";
 import { castSkill, skillTick, freshBuffs, knows, damageTakenMult, damageDealtMult, speedMult, luckMult, type Buffs } from "./skill-play";
 import { SKILL_BY_ID, SPIRIT_IDS } from "./skills";
 import { cloudShadows, filmGrain, lensGlow, lightMotes, softBloom, splitTone } from "./cinema-fx";
@@ -21,7 +20,7 @@ import {
 } from "./data";
 import { generateWorld, W, H, TS, T, tileAt, biomeOf, solidAt, BIOME_LIST, hash, type World } from "./world";
 import { BIOME_LEVEL, enemyLevel, levelScale, xpModifier } from "./levels";
-import { buildTiles, drawChar, drawEnemy, drawStatue, drawNode } from "./gfx";
+import { buildTiles, drawAttackFx, drawChar, drawEnemy, drawStatue, drawNode } from "./gfx";
 import { getLook, resolveLook } from "./appearance";
 import { drawHero } from "./hero-sprite";
 import { petTick, petOnKill, drawPets, petsSave, petsLoad, petGuardMult, petDamageMult } from "./pet-play";
@@ -32,12 +31,13 @@ import { Audio } from "./audio";
 import { ABYSS_BOSS_LOOK } from "./dungeon";
 import { BEASTS, beastKey } from "./bestiary";
 import { drawBeast } from "./beast-art";
-import { carveEntrances, depthAction, surfaceEntrance, drawSurfaceEntrances, drawDepth, depthLights, depthDarkness, leaveDepth, type DepthState } from "./depthplay";
+import { carveEntrances, depthAction, surfaceEntrance, drawSurfaceEntrances, drawDepth, depthLights, depthDarkness, leaveDepth, restartTutorialFloor, TUTORIAL_BOSS_ID, TUTORIAL_BOSS_LOOK, type DepthState } from "./depthplay";
 import { BOAT_RECIPES } from "./archipelago";
 import { archipelagoInteract, archipelagoPrompt, archipelagoArea, onBoatCraft, updateSea, renderSea, islandTick, islandOnKill, leaveArchipelago, drawIslandProps, drawIslandAtmosphere, type SeaRun, type IslandRun } from "./sailing";
 import { objectiveWaypoint, type Waypoint } from "./waypoint";
-import { waterLife, windLife, biomeLife } from './biome-anim';
+import { waterLife, windLife, biomeLife, bossArenaLife } from './biome-anim';
 import { STORY_BOSS_LOOK, STORY_QUESTS, ALL_ECO_BOSSES, beatsFor, depthBonus, cycleBonus, cycleBossMult, endgameDrop, actChainQuests, type Beat } from "./story";
+import { attackOf } from "./boss-attacks";
 
 export const VW = 480;
 export const VH = 270;
@@ -49,7 +49,7 @@ const LEGACY_BOSS_LOOK: Record<string, { kind: EnemyKind; tint: string; scale: n
   fenrir: { kind: "wolf", tint: "#b8e4ff", scale: 2.6 },
   crystal_golem: { kind: "golem", tint: "#b080ff", scale: 2.5 },
 };
-export const BOSS_LOOK: Record<string, { kind: EnemyKind; tint: string; scale: number }> = { ...LEGACY_BOSS_LOOK, ...STORY_BOSS_LOOK, ...ABYSS_BOSS_LOOK, ...SAGA_BOSS_LOOK };
+const BOSS_LOOK: Record<string, { kind: EnemyKind; tint: string; scale: number }> = { ...LEGACY_BOSS_LOOK, ...STORY_BOSS_LOOK, ...ABYSS_BOSS_LOOK, ...SAGA_BOSS_LOOK, ...TUTORIAL_BOSS_LOOK };
 
 /** Cor de grading por bioma legado (os biomas de fronteira usam a própria cor-base). [r, g, b, alpha] */
 const GRADES: Partial<Record<Biome, [number, number, number, number]>> = {
@@ -70,7 +70,7 @@ const AMBIENT: Partial<Record<Biome, { mode: "fall" | "rise" | "drift"; color: s
   amber: { mode: "drift", color: "#ffd080", n: 36 }, oasis: { mode: "drift", color: "#fff0b0", n: 32, glow: true }, ruins: { mode: "drift", color: "#e8d8b0", n: 24 },
 };
 
-interface BossState { def: BossDef; active: boolean; phase: 1 | 2; patT: number; charge: number; cvx: number; cvy: number; step?: number; pend?: { t: number; fn: () => void }[] }
+interface BossState { def: BossDef; active: boolean; phase: 1 | 2; patT: number; attackIndex: number; charge: number; cvx: number; cvy: number }
 export interface Enemy {
   id: number; kind: EnemyKind; x: number; y: number; hx: number; hy: number; hp: number; maxhp: number; atk: number; def: number;
   speed: number; xp: number; gold: number; level: number; cd: number; hurt: number; dir: number; alive: boolean; respawn: number;
@@ -111,6 +111,12 @@ export class Game {
   /** Abismo do Cântico ou andar escuro de um templo (null = superfície). */
   depth: DepthState | null = null;
   depthReturn = { x: 0, y: 0 };
+  /** Primeira jornada guiada; saves antigos continuam diretamente na campanha. */
+  tutorialActive = false;
+  tutorialFloor = 0;
+  tutorialDone = false;
+  tutorialModalPending = false;
+  tutorialModalDone = false;
   surfaceEnemies: Enemy[] = [];
   /** Velejando no Mar de Ømnia (null = em terra). */
   sea: SeaRun | null = null;
@@ -124,7 +130,7 @@ export class Game {
   openedChests = new Set<string>();
   transition = 0;
   doorCooldown = 0;
-  get areaName() { const ar = archipelagoArea(this); if (ar) return ar; const sp = sagaPosOf(this); if (sp) return `${sp.realm.name} · ${sp.zone.name}`; if (this.depth) return this.depth.kind === 'abyss' ? `Abismo do Cântico · Andar ${this.depth.floor}` : isRealm(this.depth.temple) ? `${this.depth.temple?.name} · Reino Oculto` : `${this.depth.temple?.name} · 2º andar`; return this.interior?.name ?? (Math.hypot(this.p.x / TS - 122, this.p.y / TS - 126) < 19 ? 'Vila de Potos' : BIOME_NAMES[this.biome]); }
+  get areaName() { const ar = archipelagoArea(this); if (ar) return ar; const sp = sagaPosOf(this); if (sp) return `${sp.realm.name} · ${sp.zone.name}`; if (this.depth) return this.depth.kind === 'tutorial' ? `Treino de Aventureiro · Andar ${this.depth.floor}/3` : this.depth.kind === 'abyss' ? `Abismo do Cântico · Andar ${this.depth.floor}` : isRealm(this.depth.temple) ? `${this.depth.temple?.name} · Reino Oculto` : `${this.depth.temple?.name} · 2º andar`; return this.interior?.name ?? (Math.hypot(this.p.x / TS - 122, this.p.y / TS - 126) < 19 ? 'Vila de Potos' : BIOME_NAMES[this.biome]); }
   get localNpcs(): NpcDef[] {
     if (this.depth || this.island || this.sea) return [];
     if (!this.interior) return NPCS;
@@ -309,7 +315,7 @@ export class Game {
       const e = this.makeEnemy(look.kind, b.tx * TS + 8, b.ty * TS + 8, 1);
       const cm = cycleBossMult(this.cycle);
       e.hp = e.maxhp = Math.round(b.hp * cm.hp); e.atk = Math.round(b.atk * cm.atk); e.def = TIER[b.biome] * 3 + this.cycle * 6; e.xp = Math.round(b.xp * (1 + this.cycle * 0.5)); e.gold = b.gold; e.speed = 30; e.level = (b.id === "vael" ? 45 : BIOME_LEVEL[b.biome] + 6) + cycleBonus(this.cycle);
-      e.boss = { def: b, active: false, phase: 1, patT: 2, charge: 0, cvx: 0, cvy: 0 };
+      e.boss = { def: b, active: false, phase: 1, patT: 2, attackIndex: 0, charge: 0, cvx: 0, cvy: 0 };
       this.enemies.push(e);
     }
   }
@@ -423,6 +429,7 @@ export class Game {
     if (e.boss) {
       const b = e.boss.def;
       this.bossesDone.add(b.id);
+      if (b.id === TUTORIAL_BOSS_ID) { this.tutorialActive = false; this.tutorialDone = true; this.tutorialFloor = 3; this.tutorialModalPending = true; this.p.points = Math.max(this.p.points, 3); }
       this.activeBoss = null;
       this.audio.boss = false;
       this.toast(`${b.name} foi derrotado!`, "#ffd040");
@@ -495,6 +502,7 @@ export class Game {
     this.audio.boss = true;
     this.audio.sfx("boss");
     this.toast(`⚔ ${e.boss.def.name} desperta!`, "#ff6060");
+    this.fireBeats(`boss:intro:${e.boss.def.id}`);
     this.shake = 8;
   }
 
@@ -958,6 +966,7 @@ export class Game {
     if (p.dead > 0) {
       p.dead -= dt;
       if (p.dead <= 0) {
+        if (this.depth?.kind === 'tutorial' && this.tutorialActive) { p.dead = 0; restartTutorialFloor(this); this.updateFx(dt); return; }
         if (this.depth) { leaveDepth(this, true); this.p.respawnStatue = "village"; }
         leaveArchipelago(this);
         const s = STATUES.find((x) => x.id === p.respawnStatue) ?? STATUES[0]; if (!s) return;
@@ -1103,52 +1112,52 @@ export class Game {
       this.burst(e.x, e.y - 20, "#ff4040", 40, 120, 3);
     }
     const ph2 = bs.phase === 2;
-    const atk = e.atk * BOSS_DAMAGE_MULT;
-    // ataques com atraso (ondas, sequências)
-    if (bs.pend?.length) {
-      for (const q of bs.pend) q.t -= dt;
-      const due = bs.pend.filter((q) => q.t <= 0); bs.pend = bs.pend.filter((q) => q.t > 0);
-      for (const q of due) q.fn();
-    }
     if (bs.charge > 0) {
       bs.charge -= dt;
       this.moveBody(e, bs.cvx * dt, bs.cvy * dt, 10, 6);
       if (Math.random() < 0.5) this.parts.push({ x: e.x, y: e.y, vx: 0, vy: -10, life: 0.4, max: 0.4, color: bs.def.color, size: 3, grav: 0 });
-      if (d < 26) this.hurtPlayer(atk * 1.3, e.x, e.y);
+      if (d < 26) this.hurtPlayer(e.atk * 1.3, e.x, e.y);
       return;
     }
     // chase
     if (d > 24) this.moveBody(e, (dx / d) * e.speed * (ph2 ? 1.4 : 1) * dt, (dy / d) * e.speed * (ph2 ? 1.4 : 1) * dt, 10, 6);
     if (Math.abs(dx) > 4) e.dir = dx < 0 ? 1 : 2;
-    if (d < 28 && e.cd <= 0) { e.cd = 1; this.hurtPlayer(atk, e.x, e.y); }
+    if (d < 28 && e.cd <= 0) { e.cd = 1; this.hurtPlayer(e.atk, e.x, e.y); }
     bs.patT -= dt;
     if (bs.patT > 0) return;
-    bs.patT = ph2 ? 1.5 : 2.4;
-    const seq = bossSequence(bs.def.id);
-    const step = bs.step ?? 0; bs.step = step + 1;
-    // fase 1 usa os 6 primeiros golpes; na fúria, todos os 10, na ordem própria do chefe.
-    const moveId = ph2 ? seq[step % seq.length]! : seq[step % 6]!;
-    const c = bs.def.color;
-    const ctx: BossCtx = {
-      ex: e.x, ey: e.y, px: p.x, py: p.y, atk, color: c, ph2,
-      shot: (x, y, vx, vy, dmg, r = 4, life = 2.5) => this.projs.push({ x, y, vx, vy, life, dmg, from: "e", kind: "boss", r, color: c }),
-      tele: (x, y, r, delay, dmg) => this.teles.push({ x, y, r, t: delay, max: delay, dmg }),
-      later: (delay, fn) => (bs.pend ??= []).push({ t: delay, fn: () => { if (!e.alive || !bs.active) return; ctx.ex = e.x; ctx.ey = e.y; ctx.px = p.x; ctx.py = p.y; fn(); } }),
-      charge: (vx, vy, time) => { bs.charge = time; bs.cvx = vx; bs.cvy = vy; },
-      blink: (x, y) => { if (!solidAt(this.world, x, y)) { this.burst(e.x, e.y - 10, c, 20, 80); e.x = x; e.y = y; this.burst(x, y - 10, c, 30, 120); } },
-      summon: (n) => {
-        for (let i = 0; i < n; i++) {
-          const m = this.makeEnemy(bs.def.minion, e.x + (Math.random() - 0.5) * 60, e.y + (Math.random() - 0.5) * 60, enemyLevel(bs.def.biome, bs.def.minion) + cycleBonus(this.cycle));
-          m.summoned = true; m.hx = e.hx; m.hy = e.hy;
-          if (!solidAt(this.world, m.x, m.y)) { this.enemies.push(m); this.burst(m.x, m.y - 6, c, 12, 60); }
-        }
-        this.toast(`${bs.def.name} invoca reforços!`, "#ffa060");
-      },
-      shake: (n) => { this.shake = Math.max(this.shake, n); },
-      sfx: (n) => this.audio.sfx(n as never),
-    };
-    BOSS_MOVES[moveId]!.run(ctx);
-    this.texts.push({ x: e.x, y: e.y - 44, text: BOSS_MOVES[moveId]!.name, color: c, life: 1.2 });
+    const atk = attackOf(bs.def, bs.attackIndex++); bs.patT = (ph2 ? atk.cooldown * .62 : atk.cooldown) * (0.9 + Math.random() * .2);
+    const c = atk.color, hit = e.atk * atk.power;
+    const projectile = (a: number, speed: number, r = 4, life = 2.4) => this.projs.push({ x: e.x, y: e.y - 14, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life, dmg: hit, from: "e", kind: "boss", r, color: c });
+    const n = ph2 ? atk.count + 4 : atk.count, base = Math.atan2(dy, dx);
+    if (atk.shape === "ring" || atk.shape === "nova") {
+      const rings = atk.shape === "nova" ? 2 : 1; for (let ring = 0; ring < rings; ring++) for (let i = 0; i < n; i++) projectile((i / n) * Math.PI * 2 + ring * .18, 72 + ring * 38, 3 + ring, 2.4);
+      this.burst(e.x, e.y - 14, c, 16 + n, 90, 2); this.audio.sfx("fire");
+    } else if (atk.shape === "spiral" || atk.shape === "vortex" || atk.shape === "constellation") {
+      for (let i = 0; i < n + 8; i++) { const a = base + i * (atk.shape === "vortex" ? .42 : .58); projectile(a, atk.shape === "vortex" ? 58 + i * 3 : 82 + (i % 3) * 15, 3, 2.8); }
+      this.burst(e.x, e.y - 14, c, 24, 70, 2); this.audio.sfx("wind");
+    } else if (atk.shape === "blades" || atk.shape === "cross") {
+      const arms = atk.shape === "cross" ? 4 : n; for (let i = 0; i < arms; i++) projectile(base + (i / arms) * (atk.shape === "cross" ? Math.PI * 2 : atk.spread * (i - arms / 2)), 150, 5, 1.8);
+      this.shake = 5; this.audio.sfx("swing");
+    } else if (atk.shape === "fan" || atk.shape === "serpent") {
+      for (let i = 0; i < n; i++) projectile(base + (i / Math.max(1, n - 1) - .5) * atk.spread * 4, 125 + (i % 3) * 18, 3, 2.2);
+      this.audio.sfx("bow");
+    } else if (atk.shape === "beam" || atk.shape === "pulse") {
+      for (let i = -2; i <= 2; i++) projectile(base + i * .07, 190, 5, 1.5);
+      this.parts.push({ x: e.x, y: e.y - 12, vx: 0, vy: 0, life: .45, max: .45, color: c, size: 10, grav: 0 }); this.audio.sfx("light");
+    } else if (atk.shape === "meteor" || atk.shape === "minefield" || atk.shape === "ground") {
+      for (let i = 0; i < n; i++) { const ox = (Math.random() - .5) * 130, oy = (Math.random() - .5) * 100; this.teles.push({ x: p.x + ox, y: p.y + oy, r: 13 + (i % 3) * 5, t: atk.shape === "meteor" ? .8 : 1.15, max: atk.shape === "meteor" ? .8 : 1.15, dmg: hit }); }
+      this.burst(p.x, p.y - 8, c, 18, 80, 2);
+    } else if (atk.shape === "prison") {
+      for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; this.teles.push({ x: p.x + Math.cos(a) * 34, y: p.y + Math.sin(a) * 28, r: 12, t: 1.3, max: 1.3, dmg: hit }); }
+      this.toast(`${bs.def.name}: ${atk.name}`, c);
+    } else if (atk.shape === "clone" || atk.shape === "summon") {
+      const amount = atk.shape === "clone" ? 2 : 3; for (let i = 0; i < amount; i++) { const m = this.makeEnemy(bs.def.minion, e.x + (Math.random() - .5) * 70, e.y + (Math.random() - .5) * 70, enemyLevel(bs.def.biome, bs.def.minion) + cycleBonus(this.cycle)); m.summoned = true; m.hx = e.hx; m.hy = e.hy; if (!solidAt(this.world, m.x, m.y)) { this.enemies.push(m); this.burst(m.x, m.y - 6, c, 14, 70); } }
+      this.toast(`${bs.def.name}: ${atk.name}`, c);
+    } else if (atk.shape === "tele") {
+      for (let i = 0; i < n; i++) this.teles.push({ x: p.x + (i ? (Math.random() - .5) * 110 : 0), y: p.y + (i ? (Math.random() - .5) * 90 : 0), r: 20, t: 1.05, max: 1.05, dmg: hit });
+    } else if (atk.shape === "charge") {
+      this.teles.push({ x: p.x, y: p.y, r: 16, t: .65, max: .65, dmg: 0 }); bs.charge = .75; bs.cvx = (dx / d) * 250; bs.cvy = (dy / d) * 250; this.audio.sfx("wind");
+    }
     this.enemies = this.enemies.filter((x) => !(x.summoned && !x.alive));
   }
 
@@ -1351,22 +1360,27 @@ export class Game {
       const w = this.weapon();
       const look = resolveLook(getLook(), armor.color, ring);
       const L = getLook();
-      if (!drawHero(c, p.x, p.y, { skin: L.kskin, dir: p.dir, moving: Math.hypot(p.vx, p.vy) > 10, frameT: p.frameT, attack: Math.max(0, p.attackT), weapon: w, time: this.clock }))
+      if (!drawHero(c, p.x, p.y, { skin: L.kskin, dir: p.dir, moving: Math.hypot(p.vx, p.vy) > 10, frameT: p.frameT, attack: Math.max(0, p.attackT), weapon: w, time: this.clock, pal: look.pal, extras: look.extras }))
         drawChar(c, p.x, p.y, look.pal, p.dir, p.frame, { kind: w.weapon ?? "sword", color: w.color }, Math.max(0, p.attackT), look.extras);
+      drawAttackFx(c, p.x, p.y, p.dir, Math.max(0, p.attackT), w.weapon ?? "sword", w.color, this.clock);
     } });
     drawPets(this, c, draws, wt);
     draws.sort((a, b) => a.y - b.y);
     for (const d of draws) d.f();
     // projectiles
     for (const pr of this.projs) {
-      c.fillStyle = pr.color;
+      const pa = Math.atan2(pr.vy, pr.vx), speed = Math.min(34, Math.hypot(pr.vx, pr.vy) * 0.08);
+      c.save(); c.globalCompositeOperation = "lighter"; c.strokeStyle = `${pr.color}66`; c.lineWidth = pr.kind === "boss" ? 4 : 2;
+      c.beginPath(); c.moveTo(pr.x - Math.cos(pa) * speed, pr.y - Math.sin(pa) * speed); c.lineTo(pr.x, pr.y); c.stroke();
+      c.fillStyle = `${pr.color}33`; c.beginPath(); c.arc(0, 0, pr.r * 2.5, 0, Math.PI * 2); c.fill(); c.fillStyle = pr.color; c.translate(pr.x, pr.y);
       if (pr.kind === "arrow") {
-        const a = Math.atan2(pr.vy, pr.vx);
-        c.save(); c.translate(pr.x, pr.y); c.rotate(a); c.fillRect(-6, -0.5, 10, 1); c.fillStyle = "#fff"; c.fillRect(3, -1, 2, 2); c.restore();
+        c.rotate(pa); c.fillRect(-8, -1, 13, 2); c.fillStyle = "#fff"; c.fillRect(4, -2, 3, 3);
       } else {
         c.beginPath(); c.arc(pr.x, pr.y, pr.r, 0, Math.PI * 2); c.fill();
-        c.fillStyle = "#ffffff"; c.fillRect(pr.x - 1, pr.y - 1, 2, 2);
+        c.fillStyle = "#ffffff"; c.fillRect(-1, -1, 2, 2);
+        if (pr.kind === "fire" || pr.kind === "ice" || pr.kind === "orb") { c.strokeStyle = `${pr.color}bb`; c.lineWidth = 1; c.beginPath(); c.arc(0, 0, pr.r + 2 + Math.sin(this.clock * 12) * 1.5, this.clock, this.clock + 4); c.stroke(); }
       }
+      c.restore();
     }
     for (const q of this.parts) { c.globalAlpha = Math.max(0, q.life / q.max); c.fillStyle = q.color; c.fillRect(Math.round(q.x), Math.round(q.y), q.size, q.size); }
     c.globalAlpha = 1;
@@ -1407,6 +1421,7 @@ export class Game {
     else if (!this.interior && !this.depth) this.renderWeather(); else if (this.depth) sagaWeather(this, c);
     if (!this.depth) this.art.ambient(this,c);
     biomeLife(this,c);
+    bossArenaLife(this,c);
     if (!this.interior && !this.depth) this.godRays(c);
     this.postFx(c);
     // floating text
@@ -1591,7 +1606,7 @@ export class Game {
       const data = {
         p: { ...this.p, ...(this.interior ? this.returnPosition : {}), ...(this.depth ? this.depthReturn : {}), ...(this.sea || this.island ? this.seaReturn : {}), dead: 0 }, abyssBest: this.abyssBest, inventory: this.inventory, questStatus: this.questStatus, questProg: this.questProg,
         discoveries: [...this.discoveries], openedChests: [...this.openedChests],
-        settlement: this.settlement, terrainEdits:this.terrainEdits, statues: [...this.statues], bosses: [...this.bossesDone], time: this.time, cycle: this.cycle, seenBeats: [...this.seenBeats],
+        settlement: this.settlement, terrainEdits:this.terrainEdits, statues: [...this.statues], bosses: [...this.bossesDone], time: this.time, cycle: this.cycle, seenBeats: [...this.seenBeats], tutorialDone: this.tutorialDone, tutorialModalPending: this.tutorialModalPending, tutorialModalDone: this.tutorialModalDone,
       };
       localStorage.setItem("golden-arrow-save", JSON.stringify(data));
       epicSave(this); petsSave(this);
@@ -1612,6 +1627,11 @@ export class Game {
       this.statues = new Set(d.statues); this.bossesDone = new Set(d.bosses); this.time = d.time ?? 0.3;
       this.abyssBest = d.abyssBest ?? 0;
       this.cycle = d.cycle ?? 0; this.seenBeats = new Set(d.seenBeats ?? []);
+      // Saves anteriores à primeira jornada guiada não interrompem uma campanha já iniciada.
+      this.tutorialDone = d.tutorialDone ?? true;
+      this.tutorialModalPending = d.tutorialModalPending ?? false;
+      this.tutorialModalDone = d.tutorialModalDone ?? true;
+      this.tutorialActive = false; this.tutorialFloor = 0;
       if (!d.seenBeats) this.seenBeats.add("prologue"); // saves antigos já viveram o começo da história
       if (this.cycle > 0) this.rebuildEnemies(); else this.retireDefeatedBosses();
       if (this.questStatus["m6"] === "done") this.fireBeats("quest:m6"); // quem já salvou a Árvore ouve a revelação dos Ecos

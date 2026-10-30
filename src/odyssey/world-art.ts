@@ -5,6 +5,7 @@ import propsSheet from '@/assets/art/props-sheet.png';
 import { FRONTIER, type FrontierBiome } from './frontier';
 import { T, TS, hash } from './world';
 import type { Game } from './engine';
+import { drawK, kWorldSheet } from './kaetram';
 
 // Arte detalhada em pixel art (folhas de 8 sprites, células de 128px alinhadas pela base).
 const CELL = 128;
@@ -121,6 +122,9 @@ export class WorldArt {
     if (!ready(img)) return;
     c.drawImage(scaledSprite(img, i, size, variant), Math.round(x - size / 2), Math.round(y - size));
   }
+  private kaetram(c: CanvasRenderingContext2D, key: string | undefined, x: number, y: number, clock: number, scale: number) {
+    return key ? drawK(c, key, 'idle', clock * 1.5, x, y, false, 1, scale) : false;
+  }
   /** Sombra em duas camadas (contato escuro + projeção suave para a direita). */
   private shadow(c: CanvasRenderingContext2D, x: number, y: number, rx: number) {
     c.save(); c.fillStyle = '#0c1c16';
@@ -143,6 +147,9 @@ export class WorldArt {
     size += Math.floor(hash(tx, ty, 17) * 5) - 2;
     const x = tx * TS + 8, y = ty * TS + 16;
     this.shadow(c, x, y, size * .3);
+    const kind = t === T.ROCK || t === T.CRYSTAL ? 'rock' : t === T.PILLAR ? 'object' : 'bush';
+    const local = this.kaetram(c, kWorldSheet(kind, biome, hash(tx, ty, 191) * 1000), x, y, tx + ty, size / 24);
+    if (local) return true;
     this.blit(c, this.sheets[2]!, i, x, y, size, Math.floor(hash(tx, ty, 18) * 8));
     return true;
   }
@@ -165,7 +172,13 @@ export class WorldArt {
     const i = t === T.PALM ? 4 : t === T.DTREE ? 5 : t === T.AUTUMN_TREE ? 6 : t === T.PINE ? 7 : Math.floor(r * 4);
     const size = (t === T.PALM ? 46 : t === T.PINE ? 50 : 54) + Math.floor(r * 8) - 4;
     this.shadow(c, x, y, size * .34);
+    // O continente principal usa exclusivamente a vegetação autoral deste jogo.
     this.blit(c, this.trees, i, x, y, size, Math.floor(hash(tx, ty, 85) * 8));
+  }
+  /** Vegetação Kaetram reservada às ilhas do arquipélago. */
+  islandTree(c: CanvasRenderingContext2D, kind: string, x: number, y: number, clock: number, scale = 1) {
+    const key = kWorldSheet('tree', kind, hash(Math.round(x), Math.round(y), 193) * 1000);
+    return this.kaetram(c, key, x, y, clock, scale);
   }
   village(c: CanvasRenderingContext2D, clock: number) {
     if (!ready(this.trees)) return;

@@ -4,6 +4,7 @@ import { paintDetailed, TILE_VARIANTS } from './tile-art';
 import type { EnemyKind, Palette, WeaponKind } from "./data";
 import { drawFoe } from "./foe-art";
 import { isFoe } from "./foes";
+import { drawK, drawKMob, kPick } from "./kaetram";
 
 type Ctx = CanvasRenderingContext2D;
 const px = (c: Ctx, x: number, y: number, w: number, h: number, col: string) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
@@ -193,6 +194,9 @@ function drawWeapon(c: Ctx, x: number, y: number, dir: number, w: { kind: Weapon
 }
 
 export function drawEnemy(c: Ctx, kind: EnemyKind, x: number, y: number, t: number, dir: number, flash: boolean, scale = 1, tint?: string) {
+  // Use the real Kaetram sheet whenever the enemy has an exact local match.
+  // New Creature Clash foes and any missing sheet retain the procedural art below.
+  if (drawKMob(c, kind, x, y, t, dir, flash ? 0.72 : 1, scale)) return;
   c.save();
   c.translate(Math.round(x), Math.round(y));
   if (scale !== 1) c.scale(scale, scale);
@@ -546,4 +550,27 @@ export function drawItemIcon(c: Ctx, id: string, color: string, type: string, x:
   }
   c.restore();
   void id;
+}
+/** Camada de combate: cada família de arma tem uma assinatura de movimento própria. */
+export function drawAttackFx(c: Ctx, x: number, y: number, dir: number, attack: number, kind: WeaponKind, color: string, time: number) {
+  if (attack <= 0) return;
+  const a = Math.atan2([1, 0, 0, -1][dir], [0, -1, 1, 0][dir]);
+  const p = 1 - attack, ease = Math.sin(p * Math.PI), reach = 9 + ease * 18;
+  const effectQuery = kind === "bow" ? "feathers archery" : kind === "staff" ? "magic critical" : kind === "spear" ? "boulder" : "critical";
+  const effect = kPick("effects", effectQuery, Math.floor(time * 7));
+  if (effect) drawK(c, effect, "effect", time * 9, x + Math.cos(a) * reach, y - 8 + Math.sin(a) * reach, false, Math.min(1, ease + .15), kind === "staff" ? .8 : .62);
+  c.save(); c.translate(x, y - 8); c.rotate(a); c.globalCompositeOperation = "lighter";
+  if (kind === "sword") {
+    for (let i = 0; i < 3; i++) { c.strokeStyle = `${color}${i === 0 ? "dd" : "66"}`; c.lineWidth = i === 0 ? 2 : 1; c.beginPath(); c.arc(0, 0, reach + i * 3, -1.4 + p * 1.8, .2 + p * 1.8); c.stroke(); }
+    c.fillStyle = "#fff4b0"; for (let i = 0; i < 5; i++) c.fillRect(Math.cos(p * 5 + i) * reach, Math.sin(p * 5 + i) * reach, 1.5, 1.5);
+  } else if (kind === "spear") {
+    c.strokeStyle = `${color}cc`; c.lineWidth = 2; c.beginPath(); c.moveTo(1, 0); c.lineTo(reach + 12, 0); c.stroke(); c.strokeStyle = `${color}66`; c.beginPath(); c.arc(reach, 0, 7 + ease * 4, -1.2, 1.2); c.stroke();
+  } else if (kind === "bow") {
+    c.strokeStyle = `${color}dd`; c.lineWidth = 1; c.beginPath(); c.moveTo(2, -7); c.quadraticCurveTo(8 - ease * 8, 0, 2, 7); c.stroke(); c.strokeStyle = "#fff"; c.beginPath(); c.moveTo(2, -7); c.lineTo(2, 7); c.stroke();
+  } else {
+    for (let i = 0; i < 3; i++) { c.strokeStyle = `${color}${i === 0 ? "cc" : "55"}`; c.lineWidth = 1; c.beginPath(); c.arc(reach - i * 5, 0, 5 + i * 3 + ease * 8, 0, Math.PI * 2); c.stroke(); }
+    c.fillStyle = color; c.fillRect(reach - 2, -2, 4, 4); c.fillStyle = "#fff"; c.fillRect(reach - 1, -1, 2, 2);
+  }
+  c.globalAlpha = .8; c.fillStyle = `${color}88`; for (let i = 0; i < 4; i++) c.fillRect(reach * .5 + Math.sin(time * 9 + i) * 5, Math.cos(time * 7 + i) * 5, 1, 1);
+  c.restore();
 }

@@ -9,6 +9,8 @@ import loadingArt from "@/assets/intro/loading.jpg";
 import biomesArt from "@/assets/intro/biomes.jpg";
 import { IntroCutscene } from "@/components/IntroCutscene";
 
+const AUTH_CONFIGURED = Boolean(import.meta.env['VITE_SUPABASE_URL'] && import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY']);
+
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
@@ -155,6 +157,7 @@ function MainMenu() {
   const [name, setName] = useState("");
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    if (!AUTH_CONFIGURED) return;
     const { data } = supabase.auth.onAuthStateChange((_e, s) => setUser(s?.user ?? null));
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
     return () => data.subscription.unsubscribe();
@@ -166,10 +169,10 @@ function MainMenu() {
 
   return (
     <div className="title-menu">
-      <div className="menu-greet">{user ? <>Bem-vindo, <b>{name || "aventureiro"}</b></> : "Entre para criar seu perfil de jogador"}</div>
+      <div className="menu-greet">{!AUTH_CONFIGURED ? "Modo local — progresso salvo neste navegador" : user ? <>Bem-vindo, <b>{name || "aventureiro"}</b></> : "Entre para criar seu perfil de jogador"}</div>
       <Link to="/odyssey" className="menu-btn primary">▶ Golden Arrow Odyssey</Link>
-      <button className="menu-btn" onClick={() => setOpen(true)}>{user ? "Minha conta" : "Entrar / Criar conta"}</button>
-      {open && <AccountPanel user={user} name={name} onName={setName} onClose={() => setOpen(false)} />}
+      {AUTH_CONFIGURED && <button className="menu-btn" onClick={() => setOpen(true)}>{user ? "Minha conta" : "Entrar / Criar conta"}</button>}
+      {open && AUTH_CONFIGURED && <AccountPanel user={user} name={name} onName={setName} onClose={() => setOpen(false)} />}
     </div>
   );
 }
