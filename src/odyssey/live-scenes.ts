@@ -203,7 +203,7 @@ export function liveDrawScreen(g: Game, c: CanvasRenderingContext2D) {
     c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = `rgba(255,236,170,${.08 * k})`; c.fillRect(0, 0, w, h);
     c.fillStyle = "#000"; c.fillRect(0, 0, w, bar); c.fillRect(0, h - bar, w, bar);
-    const sub = s.subs.find((x) => s.t >= x.a && s.t <= x.b);
+    const sub = s.subs.find((x: Sub) => s.t >= x.a && s.t <= x.b);
     if (sub) {
       const a = Math.min(clamp((s.t - sub.a) / .35), clamp((sub.b - s.t) / .35));
       c.globalAlpha = a; c.textAlign = "center"; c.textBaseline = "middle"; c.font = `6px ${FONT}`;
